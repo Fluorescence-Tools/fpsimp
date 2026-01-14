@@ -1,0 +1,35 @@
+name: fpsimp
+channels:
+  - conda-forge
+  - bioconda
+  - salilab
+dependencies:
+  # Core language/runtime
+  - python=3.11
+
+  # Web framework dependencies
+  - flask=2.3.3
+  - flask-cors=4.0.0
+  - celery=5.3.4
+  - redis-py=5.0.1
+  - werkzeug=2.3.7
+
+  # AVNN core dependencies
+  - numpy
+  - scipy
+  - biopython
+  - click
+  - requests
+  - matplotlib
+  - click-didyoumean
+  - tqdm
+  - imp
+  - scikit-learn
+
+  # Additional web-specific
+  - pandas
+  - flower
+  - python-dotenv
+
+  # Jinja2 for template rendering
+  - jinja2

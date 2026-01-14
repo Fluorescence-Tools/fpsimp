@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Results - AVNN FPSim</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <style>
+        .status-badge {
+            font-size: 1rem;
+            padding: 0.5rem 1rem;
+        }
+
+        .job-info {
+            background-color: #f8f9fa;
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .results-section {
+            margin-top: 2rem;
+        }
+
+        .file-list {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .file-list li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .file-list li:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container py-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Job Results</h1>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left me-2"></i>Back to Home
+            </a>
+        </div>
+
+        <div class="job-info">
+            <div id="jobStatus" data-status="{{ status }}" style="display: none;"></div>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <h5>Job ID: <code>{{ job_id }}</code></h5>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <span
+                        class="badge rounded-pill bg-{% if status == 'completed' %}success{% elif status == 'failed' %}danger{% elif status == 'running' %}info{% else %}secondary{% endif %} status-badge">
+                        {{ status|title }}
+                    </span>
+                </div>
+            </div>
+
+            {% if parameters %}
+            <div class="mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="mb-0">Job Parameters</h5>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#parametersCollapse" aria-expanded="false" aria-controls="parametersCollapse">
+                        <i class="fas fa-chevron-down me-1"></i>Show/Hide
+                    </button>
+                </div>
+                <div class="collapse" id="parametersCollapse">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered">
+                            <tbody>
+                                {% for key, value in parameters.items() %}
+                                <tr>
+                                    <th>{{ key|replace('_', ' ')|title }}</th>
+                                    <td>
+                                        {% if value is mapping %}
+                                        <pre class="mb-0">{{ value|tojson(indent=2) }}</pre>
+                                        {% else %}
+                                        {{ value }}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Diagnostic Information -->
+        {% if status in [JobStatus.QUEUED, JobStatus.RUNNING] %}
+        <div class="alert alert-info mt-4" id="diagnosticInfo">
+            <h5><i class="fas fa-info-circle me-2"></i>Job Diagnostics</h5>
+            <div id="diagnosticContent">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Loading diagnostic information...
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ColabFold Progress Information -->
+        {% if colabfold_info and colabfold_info.status %}
+        <div class="card mb-4 mt-4 border-success">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0"><i class="fas fa-dna me-2"></i>ColabFold Progress</h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <strong>Status:</strong>
+                            <span
+                                class="badge rounded-pill bg-{% if colabfold_info.status == 'running' %}info{% elif colabfold_info.status == 'completed' %}success{% else %}danger{% endif %} ms-2">
+                                {{ colabfold_info.status|title }}
+                            </span>
+                        </div>
+                        {% if colabfold_info.started_at %}
+                        <div class="mb-3">
+                            <strong>Started:</strong>
+                            <span class="text-muted">{{ colabfold_info.started_at }}</span>
+                        </div>
+                        {% endif %}
+                        {% if colabfold_info.completed_at %}
+                        <div class="mb-3">
+                            <strong>Completed:</strong>
+                            <span class="text-muted">{{ colabfold_info.completed_at }}</span>
+                        </div>
+                        {% endif %}
+                        {% if colabfold_info.processing_time %}
+                        <div class="mb-3">
+                            <strong>Processing Time:</strong>
+                            <span class="text-muted">{{ colabfold_info.processing_time }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-6">
+                        {% if colabfold_info.af_pdb %}
+                        <div class="mb-3">
+                            <strong>AlphaFold PDB:</strong>
+                            <div class="mt-2">
+                                <code class="d-block text-break">{{ colabfold_info.af_pdb }}</code>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if colabfold_info.status == 'running' %}
+                        <div class="alert alert-info mb-0">
+                            <i class="fas fa-spinner fa-spin me-2"></i>
+                            ColabFold is processing your structure. This may take several minutes depending on sequence
+                            length and complexity.
+                        </div>
+                        {% elif colabfold_info.status == 'completed' %}
+                        <div class="alert alert-success mb-0">
+                            <i class="fas fa-check-circle me-2"></i>
+                            ColabFold completed successfully. The predicted structure is now being used for IMP
+                            sampling.
+                        </div>
+                        {% elif colabfold_info.status == 'failed' %}
+                        <div class="alert alert-danger mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            ColabFold failed. Please check the error message and try again.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- IMP Sampling Progress (TOP PRIORITY) -->
+        {% if status in [JobStatus.RUNNING, JobStatus.SAMPLING_COMPLETE, JobStatus.COMPLETED, JobStatus.FAILED] %}
+        <div class="card mb-4 mt-4 border-primary">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="fas fa-atom me-2"></i>IMP Sampling Progress</h4>
+            </div>
+            <div class="card-body">
+                <div id="samplingLogContainer"></div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Intermediate Results Section -->
+        {% if status in [JobStatus.RUNNING, JobStatus.COLABFOLD_COMPLETE, JobStatus.SAMPLING_COMPLETE,
+        JobStatus.COMPLETED, JobStatus.FAILED] %}
+        <div class="intermediate-results mt-4">
+            <h3 class="mb-3"><i class="fas fa-chart-line me-2"></i>Intermediate Results</h3>
+
+            <!-- pLDDT and Sequence -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Sequence and pLDDT Scores</h5>
+                </div>
+                <div class="card-body">
+                    <div style="height: 300px; margin-bottom: 1rem;">
+                        <canvas id="plddtChart"></canvas>
+                    </div>
+                    <div class="mt-3">
+                        <h6>Sequence (colored by pLDDT)</h6>
+                        <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto; background: #fff;">
+                            <div id="sequenceContainer"></div>
+                        </div>
+                        <small class="text-muted d-block mt-2">
+                            <span style="background: #0053D6; color: white; padding: 2px 4px;">≥90</span>
+                            <span style="background: #65CBF3; padding: 2px 4px; margin-left: 8px;">70-90</span>
+                            <span style="background: #FFDB13; padding: 2px 4px; margin-left: 8px;">50-70</span>
+                            <span style="background: #FF7D45; padding: 2px 4px; margin-left: 8px;">&lt;50</span>
+                            <span style="border: 2px solid #00FF00; padding: 2px 4px; margin-left: 16px;">FP
+                                Region</span>
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Segmentation -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Segmentation (Rigid Bodies and Linkers)</h5>
+                </div>
+                <div class="card-body">
+                    <div id="segmentationContainer"></div>
+                </div>
+            </div>
+
+            <!-- Fluorescent Proteins -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">Detected Fluorescent Proteins</h5>
+                </div>
+                <div class="card-body">
+                    <div id="fpDomainsContainer"></div>
+                </div>
+            </div>
+
+            <!-- PMI Topology File -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h5 class="mb-0">PMI Input File (Topology)</h5>
+                </div>
+                <div class="card-body">
+                    <div id="topologyContainer"></div>
+                </div>
+            </div>
+
+        </div>
+        {% endif %}
+
+        {% if status == JobStatus.COMPLETED and results %}
+        <div class="results-section">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3>Results</h3>
+                <a href="/api/download_zip/{{ job_id }}" class="btn btn-success">
+                    <i class="fas fa-download me-2"></i>Download All as ZIP
+                </a>
+            </div>
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Output Files</h5>
+                    
+                    <!-- Important Files Description -->
+                    <div class="alert alert-info mb-3">
+                        <h6 class="alert-heading"><i class="fas fa-info-circle me-2"></i>Key Files for Further Analysis</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong><i class="fas fa-table text-info me-2"></i>fusion.top.dat</strong>
+                                <p class="mb-1 small">PMI topology file containing the complete system definition, including molecule structures, bead representations, and restraints. This file can be used to reconstruct the entire system in IMP.</p>
+                            </div>
+                            <div class="col-md-6">
+                                <strong><i class="fas fa-python text-primary me-2"></i>sampling_script.py</strong>
+                                <p class="mb-1 small">Stripped-down Python script for running additional IMP sampling. Use this to extend sampling time or try different parameters without re-running the entire pipeline.</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {% if all_files %}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>File</th>
+                                    <th>Path</th>
+                                    <th>Size</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for file in all_files %}
+                                <tr>
+                                    <td>
+                                        {% if file.extension in ['.rmf', '.rmf3'] %}
+                                        <i class="fas fa-cube text-primary me-2"></i>
+                                        {% elif file.extension in ['.json'] %}
+                                        <i class="fas fa-code text-success me-2"></i>
+                                        {% elif file.extension in ['.dat', '.top'] %}
+                                        <i class="fas fa-table text-info me-2"></i>
+                                        {% elif file.extension in ['.fasta', '.fa'] %}
+                                        <i class="fas fa-dna text-warning me-2"></i>
+                                        {% elif file.extension in ['.pdb'] %}
+                                        <i class="fas fa-atom text-danger me-2"></i>
+                                        {% elif file.extension in ['.py'] %}
+                                        <i class="fas fa-python text-primary me-2"></i>
+                                        {% elif file.extension in ['.log', '.txt'] %}
+                                        <i class="fas fa-file-alt text-secondary me-2"></i>
+                                        {% else %}
+                                        <i class="fas fa-file me-2"></i>
+                                        {% endif %}
+                                        
+                                        {% if file.name in ['fusion.top.dat', 'sampling_script.py'] %}
+                                        <strong><code>{{ file.name }}</code></strong>
+                                        <span class="badge bg-warning text-dark ms-2">Important</span>
+                                        {% else %}
+                                        <code>{{ file.name }}</code>
+                                        {% endif %}
+                                    </td>
+                                    <td><small class="text-muted">{{ file.path }}</small></td>
+                                    <td><span class="badge bg-light text-dark">{{ file.size_formatted }}</span></td>
+                                    <td>
+                                        <a href="/api/download/{{ job_id }}/{{ file.path|urlencode }}"
+                                            class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-download me-1"></i>Download
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted">No output files available</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% elif status == JobStatus.FAILED %}
+        <div class="alert alert-danger">
+            <h5><i class="fas fa-exclamation-triangle me-2"></i>Job Failed</h5>
+            <p class="mb-0">{{ job_data.get('error', 'An unknown error occurred') }}</p>
+        </div>
+        {% elif status in [JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.COLABFOLD_COMPLETE,
+        JobStatus.SAMPLING_COMPLETE] %}
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Job is {{ status|replace('_', ' ')|lower }}. This page will refresh automatically.</p>
+
+            {% if status == JobStatus.QUEUED and progress.queue_position %}
+            <div class="alert alert-info mt-3">
+                <h5><i class="fas fa-clock me-2"></i>Position in Queue</h5>
+                <p class="mb-1">
+                    <strong>Position: {{ progress.queue_position }}</strong>
+                    {% if progress.total_queued %}of {{ progress.total_queued }} jobs{% endif %}
+                </p>
+                {% if progress.estimated_wait_formatted %}
+                <p class="mb-0">
+                    <small>Estimated wait: {{ progress.estimated_wait_formatted }}</small>
+                </p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <a href="{{ url_for('results_page', job_id=job_id) }}" class="btn btn-outline-secondary">
+                <i class="fas fa-sync-alt me-2"></i>Refresh
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/results.js') }}"></script>
+    <script>
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const jobStatus = '{{ status }}';
+            const jobId = '{{ job_id }}';
+
+            // Set initial status
+            const jobStatusElement = document.getElementById('jobStatus');
+            if (jobStatusElement) {
+                jobStatusElement.dataset.status = jobStatus;
+            }
+
+            // Load intermediate results
+            if (window.initializeIntermediateResults) {
+                initializeIntermediateResults(jobId);
+            }
+
+            // Start dynamic polling for running jobs
+            if (jobStatus !== 'completed' && jobStatus !== 'failed') {
+                if (window.startStatusPolling) {
+                    startStatusPolling(jobId, 5000); // Poll every 5 seconds
+                }
+            }
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (window.statusPollingInterval) {
+                clearInterval(window.statusPollingInterval);
+            }
+        });
+    </script>
+
+    <!-- Footer -->
+    <footer class="mt-5 py-3 bg-light">
+        <div class="container">
+            <div class="row text-center text-muted small">
+                <div class="col-12">
+                    FPSIMP is developed by <a href="https://peulen.xyz" target="_blank">Thomas-Otavio Peulen</a> |
+                    <a href="https://github.com/fluorescence-tools/fpsimp" target="_blank" rel="noopener noreferrer">
+                        <i class="fab fa-github"></i> Source Code
+                    </a>
+                </div>
+                <div class="col-12 mt-2">
+                    <small class="text-muted">
+                        Job results are automatically deleted after {{ config.CLEANUP_JOBS_AFTER_DAYS or 7 }} days
+                    </small>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

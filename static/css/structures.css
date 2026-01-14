@@ -1,0 +1,243 @@
+/* Structure viewer and management styles */
+
+/* 3D Viewer Container */
+#pdbViewerContainer {
+    border-radius: 0.375rem;
+    overflow: hidden;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+#pdbViewer {
+    position: relative;
+    border-radius: 0.25rem;
+    overflow: hidden;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    min-height: 420px;
+}
+
+/* Loading states for viewer */
+#pdbViewer .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(248, 249, 250, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    border-radius: 0.25rem;
+}
+
+#pdbViewer .loading-content {
+    text-align: center;
+    padding: 2rem;
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+/* Structure list styles */
+.structure-item {
+    padding: 0.75rem 1rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    margin-bottom: 0.5rem;
+    background: #f8f9fa;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.structure-item:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+    transform: translateY(-1px);
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+.structure-item.selected {
+    background: #d1ecf1;
+    border-color: #bee5eb;
+    color: #0c5460;
+}
+
+.structure-item .structure-info {
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+}
+
+.structure-item .structure-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.structure-item .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* Structure upload area */
+.structure-upload-area {
+    border: 2px dashed #dee2e6;
+    border-radius: 0.5rem;
+    padding: 2rem;
+    text-align: center;
+    background: #f8f9fa;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.structure-upload-area:hover {
+    border-color: #0d6efd;
+    background: #f0f8ff;
+}
+
+.structure-upload-area.dragover {
+    border-color: #0d6efd;
+    background: #e7f3ff;
+    transform: scale(1.02);
+}
+
+/* Viewer controls */
+.viewer-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 100;
+    display: flex;
+    gap: 0.25rem;
+}
+
+.viewer-controls .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    opacity: 0.8;
+    backdrop-filter: blur(4px);
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.viewer-controls .btn:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 1);
+}
+
+/* Structure info panel */
+.structure-info-panel {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.structure-info-panel .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.structure-info-panel .info-row:last-child {
+    border-bottom: none;
+}
+
+.structure-info-panel .info-label {
+    font-weight: 500;
+    color: #495057;
+}
+
+.structure-info-panel .info-value {
+    color: #6c757d;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+/* Error states */
+.viewer-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6c757d;
+    text-align: center;
+    padding: 2rem;
+}
+
+.viewer-error i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.viewer-error .error-title {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.viewer-error .error-message {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    #pdbViewer {
+        height: 300px;
+        min-height: 300px;
+    }
+    
+    .structure-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .structure-item .structure-actions {
+        align-self: flex-end;
+    }
+    
+    .viewer-controls {
+        position: static;
+        justify-content: center;
+        margin-top: 0.5rem;
+    }
+}
+
+/* Animation for structure loading */
+@keyframes structureLoad {
+    0% {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.structure-loaded {
+    animation: structureLoad 0.3s ease-out;
+}
+
+/* Pulse animation for loading */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.loading-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+}

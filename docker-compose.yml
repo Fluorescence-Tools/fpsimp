@@ -1,0 +1,145 @@
+name: fpsimp-stack
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save "" --appendonly no
+
+  web:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fpsimp-stack-web
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./.env:/app/.env
+      - ./:/app
+      - ./uploads:/app/uploads
+      - ./results:/app/results
+      - ./cf_queue:/app/cf_queue
+      # Give Docker access for ColabFold master interaction
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      - WORKER_TYPE=web
+      - AVNN_WEBAPP_CONTEXT=true
+      - DISABLE_COLABFOLD=${DISABLE_COLABFOLD:-true}
+      - PYTHONPATH=/app:/app/src
+    depends_on:
+      - redis
+    command: conda run -n fpsimp python src/app.py
+
+  worker:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fpsimp-stack-web
+    volumes:
+      - ./.env:/app/.env
+      - ./:/app
+      # Give Docker access for ColabFold master interaction
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Add ColabFold shared volumes for direct access
+      - colabfold_input:/colabfold/input
+      - colabfold_output:/colabfold/output
+      - colabfold_processed:/colabfold/processed
+      - colabfold_temp:/colabfold/temp
+    env_file:
+      - .env
+    environment:
+      - WORKER_TYPE=imp
+      - DISABLE_COLABFOLD=${DISABLE_COLABFOLD:-true}
+      - PYTHONPATH=/app:/app/src
+    depends_on:
+      - redis
+    command: conda run -n fpsimp celery -A src.celery worker --loglevel=info -Q imp_queue
+
+  monitor:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fpsimp-stack-web
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./.env:/app/.env
+      - ./:/app
+    env_file:
+      - .env
+    environment:
+      - FLOWER_UNAUTHENTICATED_API=true
+      - PYTHONPATH=/app:/app/src
+    depends_on:
+      - redis
+    command: conda run -n fpsimp celery -A src.celery flower --port=5555
+
+  colabfold-master:
+    build:
+      context: .
+      dockerfile: Dockerfile.colabfold.master
+    image: fpsimp-stack-web
+    container_name: fpsimp-colabfold-master
+    volumes:
+      - colabfold_input:/colabfold/input
+      - colabfold_output:/colabfold/output
+      - colabfold_processed:/colabfold/processed
+      - colabfold_temp:/colabfold/temp
+      # Mount code for app integration
+      - ./.env:/app/.env
+      - ./:/app
+      # Give Docker access for managing workers
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      - WORKER_TYPE=colabfold_master
+      - COLABFOLD_PATH=/colabfold/localcolabfold/colabfold-conda/bin
+    depends_on:
+      - redis
+      - colabfold-worker
+    profiles:
+      - colabfold
+
+  colabfold-worker:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.colabfold.worker
+    volumes:
+      - colabfold_results:/colabfold/results
+      - colabfold_database:/colabfold/database
+      - colabfold_input:/colabfold/input
+      - colabfold_output:/colabfold/output
+      - colabfold_temp:/colabfold/temp
+    environment:
+      - COLABFOLD_PATH=/colabfold/localcolabfold/colabfold-conda/bin
+      # GPU support (set to specific GPU ID or leave empty for CPU)
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
+    # Clean workers - just stay running, master manages them
+    command: tail -f /dev/null
+    # Uncomment below for GPU support (requires NVIDIA Container Toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    scale: 2
+    profiles:
+      - colabfold
+
+volumes:
+  colabfold_results: {}
+  colabfold_database: {}
+  colabfold_input: {}
+  colabfold_output: {}
+  colabfold_processed: {}
+  colabfold_temp: {}

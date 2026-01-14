@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <title>FPsimp (Fluorescent protein simulation pipeline)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/structures.css') }}">
+    <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet">
+    <style>
+        body {
+            position: relative;
+            margin-top: 0; /* Remove margin since logo is now in navbar */
+        }
+        
+        /* Logo inside navbar */
+        .navbar-logo {
+            width: 170px;
+            height: 170px;
+            background-image: url("{{ url_for('static', filename='css/FPSIMP.png') }}");
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            margin-right: 15px;
+            display: inline-block;
+            vertical-align: top;
+            position: absolute;
+            top: -20px;
+            left: 0px;
+            z-index: 1000;
+        }
+        
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            padding-left: 150px; /* Make space for logo */
+            min-height: 50px;
+        }
+        
+        /* Adjust navbar to accommodate logo */
+        .navbar {
+            min-height: 60px;
+            position: relative;
+        }
+        
+        /* Constrain content width on wide screens */
+        .container-fluid {
+            max-width: 1400px;
+            padding-left: 40px;
+            padding-right: 40px;
+        }
+        
+        @media (max-width: 768px) {
+            .container-fluid {
+                padding-left: 20px;
+                padding-right: 20px;
+            }
+        }
+
+        .navbar {
+            min-height: 80px;
+            padding-top: 10px;
+            /* Adjust this value to position the nav content below the logo */
+        }
+
+        /* Ensure parameters card is always visible */
+        #parametersCard {
+            display: block !important;
+            /* Override any other display properties */
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+
+        .sequence-char {
+            display: inline-block;
+            padding: 0 2px;
+            margin: 0 1px;
+            cursor: pointer;
+            user-select: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12">
+                <!-- Alert container for system messages -->
+                <div id="alertContainer" class="mt-3"></div>
+
+                <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 ps-0">
+                    <div class="container-fluid px-4">
+                        <a class="navbar-brand fw-bold" href="#">
+                            <div class="navbar-logo"></div>
+                            Fluorescent Protein Simulation Pipeline
+                        </a>
+                    </div>
+                </nav>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card mb-4 bg-light border-0">
+                    <div class="card-body p-4">
+                        <h3 class="card-title fw-bold">Welcome to FPSIMP</h3>
+                        <p class="lead">Putting <strong>IMP on a leash</strong> for fluorescent protein simulation.</p>
+                        <hr>
+                        <p>FPSIMP is a fluorescent protein (FP) simulation pipeline (SIMP) that SIMPlifies the
+                            simulations of FPs and puts <a href="https://integrativemodeling.org/" target="_blank">IMP
+                                (Integrative Modeling Platform)</a> and AlphaFold on a leash to simulate fluorescence
+                            observables of proteins and protein assemblies, freely diffusing or bound to a membrane.</p>
+                        <p>FPSIMP uses AlphaFold to predict complex structures, identifies fluorescent proteins by
+                            sequence similarity, detects linker regions, coarse-grains the molecular assembly in IMP,
+                            and samples the accessible conformational space to determine possible distances and
+                            orientation factors between FPs. This simulation pipeline helps design experiments.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-8">
+                <!-- FASTA / PDB Upload Section -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h4><i class="fas fa-upload me-2"></i>Input Upload</h4>
+                    </div>
+                    <div class="card-body" id="fastaCardBody">
+                        <div id="fastaUploadSection">
+                            <div class="mb-3">
+                                <label for="fastaFile" class="form-label">FASTA File</label>
+                                <input type="file" class="form-control" id="fastaFile" accept=".fasta,.fa,.fas">
+                                <div class="form-text">Upload a FASTA file containing protein sequences</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label"><i class="fas fa-plus-circle me-1"></i>Add Structure</label>
+
+                            <div class="input-group">
+                                <button class="btn btn-outline-secondary" type="button" id="browsePdbBtn">
+                                    <i class="fas fa-folder-open"></i> Browse
+                                </button>
+                                <input type="text" class="form-control" id="pdbOrIdInput"
+                                    placeholder="Enter PDB ID (e.g., 1ABC), UniProt name (e.g., P42212) or Browse File">
+                                <button class="btn btn-primary" type="button" id="fetchStructureBtn">
+                                    <i class="fas fa-download me-1"></i>Fetch
+                                </button>
+                            </div>
+                            <!-- Hidden file input -->
+                            <input type="file" id="pdbFile" accept=".pdb,.cif,.mmcif" style="display: none;">
+
+                            <div class="form-text" id="fetchHelpText">
+                                Upload a local PDB/mmCIF file or enter a PDB ID / UniProt name.
+                            </div>
+                            <div class="form-text" id="fetchHelpTextDisabled" style="display: none;">
+                                Upload a local PDB/mmCIF file with pLDDT scores or enter a UniProt name.
+                            </div>
+
+                            <!-- Inline 3D viewer shown after PDB upload -->
+                            <div id="pdbViewerContainer" class="mt-3" style="display:none;">
+                                <label class="form-label"><i class="fas fa-cube me-1"></i>Structure Preview</label>
+                                <div id="pdbViewer"
+                                    style="width:100%; height:420px; background:#f8f9fa; border:1px solid #dee2e6; border-radius:.25rem;">
+                                </div>
+                                <div class="form-text">Interactive 3D preview of the uploaded structure. Drag to rotate,
+                                    scroll to zoom.</div>
+                            </div>
+                        </div>
+
+                        <!-- Uploaded Structures List -->
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0"><i class="fas fa-layer-group me-1"></i>Uploaded
+                                    Structures</label>
+                                <button id="clearStructuresBtn" class="btn btn-sm btn-outline-secondary">
+                                    <i class="fas fa-trash-alt me-1"></i>Clear All
+                                </button>
+                            </div>
+                            <div id="structuresList" class="border rounded p-2 mb-2"
+                                style="max-height: 300px; overflow-y: auto; min-height: 100px; background: #f8f9fa;">
+                                <div class="text-muted text-center py-3">
+                                    <i class="fas fa-upload fa-2x mb-2 opacity-50"></i>
+                                    <div>No structures uploaded yet</div>
+                                    <small>Upload FASTA files or PDB structures above</small>
+                                </div>
+                            </div>
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Check structures to include in multimer assembly. Use view/delete buttons to manage
+                                structures.
+                            </div>
+                        </div>
+
+                        <!-- Sequence Selection from Selected Structures -->
+                        <!-- <div id="sequenceSelector" class="mb-3" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label mb-0"><i class="fas fa-dna me-1"></i>Sequences from Selected Structures</label>
+                                <small class="text-muted" id="selectedStructuresCount">0 structures selected</small>
+                            </div>
+                            <select class="form-select" id="sequenceSelect">
+                                <option value="">Select a sequence for membrane anchor selection...</option>
+                            </select>
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Sequences from structures checked above. Select one to define membrane regions.
+                            </div>
+                        </div> -->
+
+                        <div class="mt-3">
+                            <label for="membraneSeqInput" class="form-label">
+                                <i class="fas fa-layer-group me-1"></i>Membrane-associated Sequences
+                            </label>
+                            <input type="text" class="form-control" id="membraneSeqInput"
+                                placeholder="Comma separated amino acid sequences." style="text-transform: uppercase;"
+                                autocapitalize="characters" spellcheck="false" autocomplete="off">
+                            <div class="form-text">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Comma-separated sequence identifiers for membrane regions (e.g., GFP, mCherry). Enter
+                                the names of the sequences you want to constrain to the membrane.
+                            </div>
+                        </div>
+
+                        <div id="sequenceDisplay">
+                            <label class="form-label">Sequence (click and drag to mark membrane regions):</label>
+                            <div class="sequence-display" id="sequenceText"></div>
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-warning btn-sm" id="clearRegions">
+                                    <i class="fas fa-eraser me-1"></i>Clear Membrane Regions
+                                </button>
+                                <span class="ms-3 text-muted">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Selected regions: <span id="regionCount">0</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Multimer Information Container -->
+                    <div id="multimerInfoContainer" class="mt-3" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label mb-0">
+                                <i class="fas fa-info-circle me-1"></i>Multimer Information
+                            </label>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#multimerInfoCollapse" aria-expanded="false"
+                                aria-controls="multimerInfoCollapse">
+                                <i class="fas fa-chevron-down me-1"></i>Toggle
+                            </button>
+                        </div>
+                        <div class="collapse" id="multimerInfoCollapse">
+                            <div id="multimerInfoContent"></div>
+
+                            <!-- Multimer Sequence Display -->
+                            <div id="multimerSequenceDisplay" class="mb-3" style="display: none;">
+                                <label for="multimerSequenceText" class="form-label">
+                                    <i class="fas fa-dna me-1"></i>Multimer Sequence for ColabFold
+                                </label>
+                                <textarea class="form-control" id="multimerSequenceText" rows="4" readonly
+                                    style="font-family: monospace; font-size: 0.9em; background-color: #f8f9fa;"></textarea>
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    This is the concatenated sequence that will be sent to ColabFold for structure
+                                    prediction.
+                                    Multiple sequences are separated by ':' for multimer assembly.
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Parameters Section -->
+                    <div class="card mb-4" id="parametersCard">
+                        <div class="card-header">
+                            <h4><i class="fas fa-cogs me-2"></i>Simulation Parameters</h4>
+                        </div>
+                        <div class="card-body">
+                            <form id="parametersForm">
+                                <!-- Pipeline Parameters Grid -->
+                                <div class="parameter-section">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h5 class="mb-0"><i class="fas fa-cogs me-2"></i>Pipeline Parameters</h5>
+                                        <button class="btn btn-outline-secondary btn-sm" type="button"
+                                            data-bs-toggle="collapse" data-bs-target="#pipelineParametersCollapse"
+                                            aria-expanded="false" aria-controls="pipelineParametersCollapse">
+                                            <i class="fas fa-chevron-down me-1"></i>Show Parameters
+                                        </button>
+                                    </div>
+                                    <div class="collapse" id="pipelineParametersCollapse">
+                                        <div class="row g-3">
+                                            <!-- ColabFold Section -->
+                                            <div class="col-lg-6" id="colabfoldSection">
+                                                <div class="parameter-subsection">
+                                                    <h6 class="text-primary"><i class="fas fa-dna me-1"></i>ColabFold
+                                                        Prediction</h6>
+                                                    <div class="row g-2">
+                                                        <div class="col-12">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox"
+                                                                    id="runColabfold">
+                                                                <label class="form-check-label" for="runColabfold">Run
+                                                                    ColabFold prediction</label>
+                                                            </div>
+                                                            <small class="form-text text-muted ms-4">
+                                                                Required for pLDDT scores used in segmentation (defining
+                                                                beads and flexible regions)
+                                                            </small>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox"
+                                                                    id="useStructurePlddt">
+                                                                <label class="form-check-label"
+                                                                    for="useStructurePlddt">Use pLDDT from provided
+                                                                    structure</label>
+                                                            </div>
+                                                            <small class="form-text text-muted ms-4">
+                                                                Override: Skip ColabFold and extract pLDDT from uploaded
+                                                                PDB file (if available)
+                                                            </small>
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <label for="memoryFraction" class="form-label">Memory
+                                                                Fraction</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="memoryFraction" value="0.5" step="0.1" min="0.1"
+                                                                max="1.0">
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <label for="gpuDevice" class="form-label">GPU Device</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="gpuDevice" placeholder="Auto">
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <label for="modelType" class="form-label">Model Type</label>
+                                                            <select class="form-select form-select-sm" id="modelType">
+                                                                <option value="auto">Auto</option>
+                                                                <option value="alphafold2_ptm">AlphaFold2 PTM</option>
+                                                                <option value="alphafold2_multimer_v3">AlphaFold2
+                                                                    Multimer v3</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <label for="colabfoldArgs" class="form-label">Additional
+                                                                Arguments</label>
+                                                            <input type="text" class="form-control form-control-sm"
+                                                                id="colabfoldArgs" value="--num-models 1">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Segmentation Section -->
+                                            <div class="col-lg-6">
+                                                <div class="parameter-subsection">
+                                                    <h6 class="text-success"><i class="fas fa-cut me-1"></i>Segmentation
+                                                    </h6>
+                                                    <div class="row g-2">
+                                                        <div class="col-12">
+                                                            <label for="plddtThreshold" class="form-label">pLDDT Rigid
+                                                                Threshold</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="plddtThreshold" value="70.0" step="0.1">
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <label for="minRigidLength" class="form-label">Min Rigid
+                                                                Length</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="minRigidLength" value="12">
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <label for="beadSize" class="form-label">Bead Size</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="beadSize" value="10">
+                                                        </div>
+                                                        <div class="col-12 mt-2">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox"
+                                                                    id="modelDisorderedAsBeads">
+                                                                <label class="form-check-label"
+                                                                    for="modelDisorderedAsBeads">
+                                                                    Model large disordered regions as beads
+                                                                </label>
+                                                            </div>
+                                                            <small class="form-text text-muted ms-4">
+                                                                If unchecked, only disordered regions adjacent to FPs
+                                                                are modeled as beads.
+                                                            </small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Monte Carlo Section -->
+                                            <div class="col-lg-6">
+                                                <div class="parameter-subsection">
+                                                    <h6 class="text-warning"><i class="fas fa-random me-1"></i>Monte
+                                                        Carlo Sampling</h6>
+                                                    <div class="row g-2">
+                                                        <div class="col-6">
+                                                            <label for="numFrames" class="form-label">Frames</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="numFrames" value="100000">
+                                                        </div>
+                                                        <div class="col-6">
+                                                            <label for="stepsPerFrame"
+                                                                class="form-label">Steps/Frame</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="stepsPerFrame" value="10">
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <label for="barrierRadius" class="form-label">Barrier
+                                                                Radius</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="barrierRadius" value="100.0" step="0.1">
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox"
+                                                                    id="reuse" checked>
+                                                                <label class="form-check-label" for="reuse">Reuse
+                                                                    existing results</label>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Membrane Section -->
+                                            <div class="col-lg-6">
+                                                <div class="parameter-subsection">
+                                                    <h6 class="text-info"><i
+                                                            class="fas fa-layer-group me-1"></i>Membrane Simulation</h6>
+                                                    <div class="row g-2">
+                                                        <div class="col-12">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox"
+                                                                    id="membrane">
+                                                                <label class="form-check-label" for="membrane">Enable
+                                                                    membrane restraint</label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <label for="membraneWeight" class="form-label">Membrane
+                                                                Weight</label>
+                                                            <input type="number" class="form-control form-control-sm"
+                                                                id="membraneWeight" value="10.0" step="0.1">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Measurement Parameters -->
+                                <div class="parameter-section">
+                                    <h5><i class="fas fa-ruler me-2"></i>Measurements</h5>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="measure">
+                                                <label class="form-check-label" for="measure">
+                                                    Compute FP distances and orientations
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="measurePlot"
+                                                    checked>
+                                                <label class="form-check-label" for="measurePlot">
+                                                    Generate measurement plots
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- FP Site Selection -->
+                                    <div id="fpSiteSelection" class="fp-site-selection" style="display: none;">
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-info-circle me-2"></i>
+                                            <strong>FP Site Selection:</strong> Select sites for FP1 and FP2.
+                                            One site per FP = distances only. Two sites per FP = distances +
+                                            orientations.
+                                        </div>
+
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <h6 class="text-primary"><i class="fas fa-arrow-up me-1"></i>Fluorescent
+                                                    Protein 1
+                                                </h6>
+                                                <div class="fp-site-group">
+                                                    <div class="fp-site-item mb-3">
+                                                        <label class="form-label">FP1 Site 1</label>
+                                                        <div class="row">
+                                                            <div class="col-6">
+                                                                <select class="form-select" id="donorChain1">
+                                                                    <option value="">Select Chain</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <input type="number" class="form-control" id="donorPos1"
+                                                                    placeholder="AA Position" min="1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="fp-site-item mb-3">
+                                                        <label class="form-label">FP1 Site 2 <small
+                                                                class="text-muted">(optional, for
+                                                                orientations)</small></label>
+                                                        <div class="row">
+                                                            <div class="col-6">
+                                                                <select class="form-select" id="donorChain2">
+                                                                    <option value="">Select Chain</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <input type="number" class="form-control" id="donorPos2"
+                                                                    placeholder="AA Position" min="1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-6">
+                                                <h6 class="text-success"><i
+                                                        class="fas fa-arrow-down me-1"></i>Fluorescent Protein 2</h6>
+                                                <div class="fp-site-group">
+                                                    <div class="fp-site-item mb-3">
+                                                        <label class="form-label">FP2 Site 1</label>
+                                                        <div class="row">
+                                                            <div class="col-6">
+                                                                <select class="form-select" id="acceptorChain1">
+                                                                    <option value="">Select Chain</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <input type="number" class="form-control"
+                                                                    id="acceptorPos1" placeholder="AA Position" min="1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="fp-site-item mb-3">
+                                                        <label class="form-label">FP2 Site 2 <small
+                                                                class="text-muted">(optional, for
+                                                                orientations)</small></label>
+                                                        <div class="row">
+                                                            <div class="col-6">
+                                                                <select class="form-select" id="acceptorChain2">
+                                                                    <option value="">Select Chain</option>
+                                                                </select>
+                                                            </div>
+                                                            <div class="col-6">
+                                                                <input type="number" class="form-control"
+                                                                    id="acceptorPos2" placeholder="AA Position" min="1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="fp-site-summary mt-3">
+                                            <div class="alert alert-secondary">
+                                                <strong>Current Selection:</strong>
+                                                <span id="fpSiteSummary">No sites selected</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+
+            </div>
+            <!-- Right Column -->
+            <div class="col-lg-4">
+                <!-- Structure Input -->
+
+
+                <!-- Help Section -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-question-circle me-2"></i>Help</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>Membrane Regions</h6>
+                        <p class="small">Click and drag on the sequence to select membrane-anchored regions. These
+                            regions will be highlighted in yellow.</p>
+
+                        <h6>Pipeline Steps</h6>
+                        <ol class="small" id="pipelineSteps">
+                            <li id="colabfoldStep"><strong>ColabFold:</strong> Predict protein structure</li>
+                            <li><strong>Segmentation:</strong> Identify rigid and flexible regions</li>
+                            <li><strong>Sampling:</strong> Run Monte Carlo simulation</li>
+                            <li><strong>Analysis:</strong> Compute measurements and generate plots</li>
+                        </ol>
+                        <ol class="small" id="pipelineStepsDisabled" style="display: none;">
+                            <li><strong>Structure Loading:</strong> Load protein structure with pLDDT scores</li>
+                            <li><strong>Segmentation:</strong> Identify rigid and flexible regions</li>
+                            <li><strong>Sampling:</strong> Run Monte Carlo simulation</li>
+                            <li><strong>Analysis:</strong> Compute measurements and generate plots</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <!-- Submit Job Button -->
+                <div class="card mt-4">
+                    <div class="card-body">
+                        <!-- Email Notification -->
+                        <div class="mb-3">
+                            <label for="emailInput" class="form-label">
+                                <i class="fas fa-envelope me-2"></i>Email for notifications (optional)
+                            </label>
+                            <input type="email" class="form-control" id="emailInput" placeholder="your@email.com">
+                            <div class="form-text">Receive email notifications when your job completes or fails.</div>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg" form="parametersForm">
+                                <i class="fas fa-play me-2"></i>Submit Job
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Job Status Section (initially hidden) -->
+                <div id="noJob" class="mt-4">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>No job submitted yet. Upload a sequence and submit a job
+                        to see status here.
+                    </div>
+                </div>
+
+                <div id="jobStatus" class="mt-4" style="display: none;">
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-tasks me-2"></i>Job Status
+                                </h5>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-light me-2" id="cancelJobBtn"
+                                        onclick="cancelJob()" style="display: none;">
+                                        <i class="fas fa-times me-1"></i>Cancel
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-light" onclick="refreshJobStatus()">
+                                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <div class="mb-2">
+                                    <strong>Job ID:</strong>
+                                    <code id="jobId" class="d-block mt-1">-</code>
+                                </div>
+                                <!-- Results link container -->
+                                <div id="resultsLinkContainer" class="mb-2" style="display: none;">
+                                    <a href="#" id="resultsLink" class="btn btn-sm btn-success">
+                                        <i class="fas fa-eye me-1"></i>View Results
+                                    </a>
+                                </div>
+                                <div>
+                                    <strong>Status:</strong>
+                                    <span id="statusBadge" class="badge bg-secondary ms-2">-</span>
+                                </div>
+                            </div>
+
+                            <!-- Overall Progress -->
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <small class="text-muted">Overall Progress</small>
+                                    <small class="text-muted"><span id="progressPercent">0</span>%</small>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div id="progressBar"
+                                        class="progress-bar progress-bar-striped progress-bar-animated"
+                                        role="progressbar" style="width: 0%">
+                                        <span id="progressText">0%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Sampling Progress (shown during sampling) -->
+                            <div id="samplingProgress" style="display: none;">
+                                <div class="alert alert-info mb-2">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <strong><i class="fas fa-atom me-2"></i>Sampling Progress</strong>
+                                        <span class="badge bg-info" id="samplingFrameBadge">Frame 0 / 0</span>
+                                    </div>
+                                </div>
+                                <div class="progress mb-2" style="height: 20px;">
+                                    <div id="samplingProgressBar"
+                                        class="progress-bar bg-info progress-bar-striped progress-bar-animated"
+                                        role="progressbar" style="width: 0%">
+                                        <span id="samplingProgressText">0%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Status Details -->
+                            <div id="statusDetails" class="mt-3">
+                                <small class="text-muted" id="statusMessage">Initializing...</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section (initially hidden) -->
+        <div id="resultsSection" class="container mt-4" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-download me-2"></i>Download Results
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="downloadLinks">
+                        <!-- Download links will be added here dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+        <!-- NGL viewer for client-side 3D structure rendering -->
+        <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
+        <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+        <!-- Footer -->
+        <footer class="mt-5 py-3 bg-light">
+            <div class="container">
+                <div class="row text-center text-muted small">
+                    <div class="col-12">
+                        FPSIMP is developed by <a href="https://peulen.xyz" target="_blank">Thomas-Otavio Peulen</a> |
+                        <a href="https://github.com/fluorescence-tools/fpsimp" target="_blank"
+                            rel="noopener noreferrer">
+                            <i class="fab fa-github"></i> Source Code
+                        </a>
+                    </div>
+                    <div class="col-12 mt-2">
+                        <small class="text-muted">
+                            Job results are automatically deleted after {{ config.CLEANUP_JOBS_AFTER_DAYS or 7 }} days
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </footer>
+</body>
+
+</html>

@@ -1,0 +1,18 @@
+# ColabFold Master Service
+# Uses the base web image with app code and Celery integration
+
+FROM --platform=linux/amd64 fpsimp-stack-web
+
+# Set working directory
+WORKDIR /app
+
+# Create ColabFold directories
+RUN mkdir -p /colabfold/input /colabfold/output /colabfold/processed
+
+# Copy master script
+COPY worker/colabfold_master.py /app/
+RUN chmod +x /app/colabfold_master.py
+
+# Keep the container running for master service
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["python", "-u", "/app/colabfold_master.py", "--input-dir", "/colabfold/input", "--output-dir", "/colabfold/output", "--processed-dir", "/colabfold/processed"]

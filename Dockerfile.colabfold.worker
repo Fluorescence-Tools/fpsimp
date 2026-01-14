@@ -1,0 +1,43 @@
+# Clean ColabFold Worker
+# Minimal container with only ColabFold and simple worker script
+
+FROM --platform=linux/amd64 fpsimp-stack-web
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    curl \
+    git \
+    bzip2 \
+    unzip \
+    aria2 \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /colabfold
+
+# Download and run the ColabFold installation script (x86_64)
+RUN wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/install_colabbatch_linux.sh \
+    && chmod +x install_colabbatch_linux.sh \
+    && ./install_colabbatch_linux.sh \
+    && rm install_colabbatch_linux.sh
+
+# Set environment variables for ColabFold
+ENV PATH="/colabfold/localcolabfold/colabfold-conda/bin:$PATH"
+ENV LD_LIBRARY_PATH="/colabfold/localcolabfold/colabfold-conda/lib:${LD_LIBRARY_PATH}"
+
+# Copy the worker scripts
+COPY worker/ /colabfold/worker/
+RUN chmod +x /colabfold/worker/colabfold_worker.py
+
+# Create directories
+RUN mkdir -p /colabfold/input /colabfold/output /colabfold/temp /colabfold/results /colabfold/database
+
+# Default command - show help
+CMD ["python", "/colabfold/worker/colabfold_worker.py", "--help"]

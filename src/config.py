@@ -22,9 +22,12 @@ class Config:
     RESULTS_FOLDER: Path = Path(os.getenv('RESULTS_FOLDER', 'results')).resolve()
     MAX_CONTENT_LENGTH: int = int(os.getenv('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))  # 16MB default
     
+    # Redis configuration
+    REDIS_PORT: int = int(os.getenv('REDIS_PORT', '6379'))
+    
     # Celery configuration (new lowercase format)
-    broker_url: str = os.getenv('CELERY_BROKER_URL', 'redis://redis:6379/0')
-    result_backend: str = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+    broker_url: str = os.getenv('CELERY_BROKER_URL', f'redis://redis:{REDIS_PORT}/0')
+    result_backend: str = os.getenv('CELERY_RESULT_BACKEND', f'redis://redis:{REDIS_PORT}/0')
     # Add old uppercase names for backward compatibility
     CELERY_BROKER_URL: str = broker_url
     CELERY_RESULT_BACKEND: str = result_backend

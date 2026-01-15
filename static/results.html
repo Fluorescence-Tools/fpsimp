@@ -48,7 +48,7 @@
     <div class="container py-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1>Job Results</h1>
-            <a href="{{ url_for('index') }}" class="btn btn-outline-primary">
+            <a href="{{ url_for('views.index') }}" class="btn btn-outline-primary">
                 <i class="fas fa-arrow-left me-2"></i>Back to Home
             </a>
         </div>
@@ -267,22 +267,42 @@
             <div class="card">
                 <div class="card-body">
                     <h5 class="card-title">Output Files</h5>
-                    
+
                     <!-- Important Files Description -->
                     <div class="alert alert-info mb-3">
-                        <h6 class="alert-heading"><i class="fas fa-info-circle me-2"></i>Key Files for Further Analysis</h6>
+                        <h6 class="alert-heading"><i class="fas fa-info-circle me-2"></i>Key Files for Further Analysis
+                        </h6>
                         <div class="row">
                             <div class="col-md-6">
                                 <strong><i class="fas fa-table text-info me-2"></i>fusion.top.dat</strong>
-                                <p class="mb-1 small">PMI topology file containing the complete system definition, including molecule structures, bead representations, and restraints. This file can be used to reconstruct the entire system in IMP.</p>
+                                <p class="mb-1 small">PMI topology file containing the complete system definition,
+                                    including molecule structures, bead representations, and restraints. This file can
+                                    be used to reconstruct the entire system in IMP.</p>
                             </div>
                             <div class="col-md-6">
                                 <strong><i class="fas fa-python text-primary me-2"></i>sampling_script.py</strong>
-                                <p class="mb-1 small">Stripped-down Python script for running additional IMP sampling. Use this to extend sampling time or try different parameters without re-running the entire pipeline.</p>
+                                <p class="mb-1 small">Stripped-down Python script for running additional IMP sampling.
+                                    Use this to extend sampling time or try different parameters without re-running the
+                                    entire pipeline.</p>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <strong><i class="fas fa-file-csv text-success me-2"></i>Analysis Files (*.tsv)</strong>
+                                <p class="mb-1 small">Tab-separated value files containing quantitative analysis
+                                    results,
+                                    including distances, orientation factors, and other metrics derived from the
+                                    ensemble.</p>
+                            </div>
+                            <div class="col-md-6">
+                                <strong><i class="fas fa-cube text-primary me-2"></i>0.rmf3</strong>
+                                <p class="mb-1 small">The primary sampled trajectory file. This file contains the 3D
+                                    coordinates of the sampled structures and can be opened with UCSF Chimera or
+                                    ChimeraX for visualization.</p>
                             </div>
                         </div>
                     </div>
-                    
+
                     {% if all_files %}
                     <div class="table-responsive">
                         <table class="table table-sm table-hover">
@@ -302,6 +322,8 @@
                                         <i class="fas fa-cube text-primary me-2"></i>
                                         {% elif file.extension in ['.json'] %}
                                         <i class="fas fa-code text-success me-2"></i>
+                                        {% elif file.extension in ['.tsv', '.csv'] %}
+                                        <i class="fas fa-file-csv text-success me-2"></i>
                                         {% elif file.extension in ['.dat', '.top'] %}
                                         <i class="fas fa-table text-info me-2"></i>
                                         {% elif file.extension in ['.fasta', '.fa'] %}
@@ -315,8 +337,9 @@
                                         {% else %}
                                         <i class="fas fa-file me-2"></i>
                                         {% endif %}
-                                        
-                                        {% if file.name in ['fusion.top.dat', 'sampling_script.py'] %}
+
+                                        {% if file.name in ['fusion.top.dat', 'sampling_script.py', '0.rmf3'] or
+                                        file.extension == '.tsv' %}
                                         <strong><code>{{ file.name }}</code></strong>
                                         <span class="badge bg-warning text-dark ms-2">Important</span>
                                         {% else %}
@@ -370,7 +393,7 @@
             </div>
             {% endif %}
 
-            <a href="{{ url_for('results_page', job_id=job_id) }}" class="btn btn-outline-secondary">
+            <a href="{{ url_for('views.results_page', job_id=job_id) }}" class="btn btn-outline-secondary">
                 <i class="fas fa-sync-alt me-2"></i>Refresh
             </a>
         </div>

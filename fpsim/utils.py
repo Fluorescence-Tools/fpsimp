@@ -6,12 +6,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Tuple
 import click
-from Bio import SeqIO
-from Bio.PDB import PDBParser, MMCIFParser, PPBuilder
 
 
 def read_single_fasta(fasta_path: Path) -> Tuple[str, str]:
     """Read exactly one sequence from a FASTA file."""
+    from Bio import SeqIO
     recs = list(SeqIO.parse(str(fasta_path), "fasta"))
     if len(recs) != 1:
         raise click.ClickException("FASTA must contain exactly one sequence")
@@ -22,6 +21,7 @@ def read_single_fasta(fasta_path: Path) -> Tuple[str, str]:
 
 def list_fasta_sequences(fasta_path: Path) -> List[Tuple[str, str]]:
     """List all sequences in a FASTA file with their IDs."""
+    from Bio import SeqIO
     recs = list(SeqIO.parse(str(fasta_path), "fasta"))
     return [(rec.id, str(rec.seq).replace("\n", "").replace("\r", "")) for rec in recs]
 
@@ -39,6 +39,7 @@ def read_fasta_sequence_by_id(fasta_path: Path, sequence_id: str) -> Tuple[str, 
     Raises:
         click.ClickException: If sequence not found or multiple matches
     """
+    from Bio import SeqIO
     recs = list(SeqIO.parse(str(fasta_path), "fasta"))
     
     if not recs:
@@ -145,6 +146,7 @@ def read_fasta_with_selection(fasta_path: Path, sequence_id: str = None) -> Tupl
     Returns:
         Tuple of (sequence_id, sequence)
     """
+    from Bio import SeqIO
     recs = list(SeqIO.parse(str(fasta_path), "fasta"))
     
     if not recs:
@@ -176,6 +178,7 @@ def sanitize_fasta_for_pmi(fasta_in: Path, fasta_out: Path) -> Tuple[List[str], 
       naming them with '_A' and '_B' suffixes.
     Returns: (list of record IDs written, number of replacements made)
     """
+    from Bio import SeqIO
     standard_aa = set("ACDEFGHIKLMNPQRSTVWY")
     
     recs = list(SeqIO.parse(str(fasta_in), "fasta"))
@@ -244,25 +247,54 @@ def extract_sequences_from_structure(structure_path: Path) -> dict:
 
     Returns a dict mapping chain ID -> sequence (string of one-letter AAs).
     """
-    parser = None
-    sp = str(structure_path)
-    if sp.lower().endswith(('.cif', '.mmcif')):
+    from Bio.PDB import PDBParser, MMCIFParser, PPBuilder
+    
+    sp = str(structure_path).lower()
+    if sp.endswith(('.cif', '.mmcif')):
         parser = MMCIFParser(QUIET=True)
     else:
         parser = PDBParser(QUIET=True)
 
-    structure = parser.get_structure("struct", sp)
+    structure = parser.get_structure("struct", str(structure_path))
     ppb = PPBuilder()
     seqs: dict[str, str] = {}
-    # Iterate over models and chains; concatenate polypeptides per chain
+    
+    # Iterate over models and chains
     for model in structure:
         for chain in model:
-            polypeptides = ppb.build_peptides(chain)
-            if not polypeptides:
-                continue
-            seq = "".join(str(pp.get_sequence()) for pp in polypeptides)
-            if seq:
-                seqs[str(chain.id)] = seq
+            # For CIF, PPBuilder can be flaky. Use robust manual extraction if needed.
+            # But first try PPBuilder as it handles non-standard residues better in some cases.
+            try:
+                polypeptides = ppb.build_peptides(chain)
+                if polypeptides:
+                    seq = "".join(str(pp.get_sequence()) for pp in polypeptides)
+                    if seq:
+                        seqs[str(chain.id)] = seq
+                        continue
+            except Exception:
+                pass
+            
+            # Fallback: Manual extraction from CA/P atoms
+            # This is robust for C-alpha traces or simple structures
+            residues = sorted([r for r in chain], key=lambda r: r.id[1])
+            seq_chars = []
+            for r in residues:
+                # 3-letter to 1-letter
+                try:
+                    from Bio.PDB.Polypeptide import three_to_one
+                    # Ensure residue name is standard 3-letter code
+                    resname = r.get_resname()
+                    if len(resname) == 3:
+                        seq_chars.append(three_to_one(resname))
+                    else:
+                        seq_chars.append('X')
+                except Exception:
+                    # Handle non-standard or unknown
+                    seq_chars.append('X')
+            
+            if seq_chars:
+                seqs[str(chain.id)] = "".join(seq_chars)
+        
         break  # only first model
     return seqs
 
@@ -282,13 +314,26 @@ def write_fasta_from_pdb(af_pdb: Path, out_fasta: Path) -> Path:
     return out_fasta
 
 def existing_ranked_pdb(models_dir: Path) -> Path | None:
-    """Find the best ranked PDB file in a directory."""
+    """Find the best ranked structure file in a directory (.pdb or .cif)."""
     if not models_dir.exists():
         return None
-    cands = sorted(list(models_dir.glob("*rank_1*.pdb")))
-    if not cands:
-        cands = sorted(list(models_dir.glob("*.pdb")))
-    return cands[0] if cands else None
+    
+    # Extensions to look for
+    exts = [".pdb", ".cif", ".mmcif"]
+    
+    # Try to find ranked structures first
+    for ex in exts:
+        cands = sorted(list(models_dir.glob(f"*rank_1*{ex}")))
+        if cands:
+            return cands[0]
+            
+    # Fallback to any structure file
+    for ex in exts:
+        cands = sorted(list(models_dir.glob(f"*{ex}")))
+        if cands:
+            return cands[0]
+            
+    return None
 
 
 def has_segments_and_top(out_dir: Path) -> bool:

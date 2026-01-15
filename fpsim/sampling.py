@@ -10,6 +10,57 @@ import click
 from .fp_lib import get_fp_library
 
 
+
+class LogFilter:
+    """Filter stdout to reduce verbosity of IMP sampling output."""
+    def __init__(self, stream, loop_interval: int = 200):
+        self.stream = stream
+        self.loop_interval = loop_interval
+        self.counter = 0
+        self.buffer = ""
+
+    def write(self, data):
+        self.buffer += data
+        if "\n" in self.buffer:
+            lines = self.buffer.split("\n")
+            # Process all complete lines
+            for line in lines[:-1]:
+                self._process_line(line + "\n")
+            # Keep the remainder
+            self.buffer = lines[-1]
+
+    def _process_line(self, line):
+        line_lower = line.lower()
+        
+        # 1. Critical lines (always print)
+        if "starting sampling" in line_lower:
+             self.stream.write(line)
+             self.stream.flush()
+             return
+
+        # 2. Drop spam lines entirely
+        if "writing coordinates" in line_lower or "energy" in line_lower:
+            return
+
+        # 3. Throttled lines (frames)
+        if "frame" in line_lower or "score" in line_lower:
+            self.counter += 1
+            if self.counter % self.loop_interval == 0:
+                self.stream.write(line)
+                self.stream.flush()
+            return
+            
+        # 4. All other lines
+        self.stream.write(line)
+        self.stream.flush()
+
+    def flush(self):
+        if self.buffer:
+            self._process_line(self.buffer)
+            self.buffer = ""
+        self.stream.flush()
+
+
 def _read_top_directories(top_path: Path) -> tuple[str | None, str | None, str | None]:
     pdb_dir = fasta_dir = gmm_dir = None
     with open(top_path, "r") as fh:
@@ -110,8 +161,13 @@ def run_imp_sampling(
     log_handle = open(log_file, 'w', buffering=1)  # Line buffered
     old_stdout = sys.stdout
     old_stderr = sys.stderr
-    sys.stdout = log_handle
-    sys.stderr = log_handle
+    
+    # Use LogFilter to throttle output
+    # target ~100 log entries total (1% progress steps)
+    loop_interval = max(1, int(frames / 100))
+    filtered_log = LogFilter(log_handle, loop_interval=loop_interval)
+    sys.stdout = filtered_log
+    sys.stderr = filtered_log
     
     try:
         mdl = IMP.Model()

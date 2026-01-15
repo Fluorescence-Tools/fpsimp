@@ -10,6 +10,7 @@ This folder contains detailed documentation for the FPSIMP application.
 ### Setup and Deployment
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Advanced deployment options and configuration
 - **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Complete cleanup and deployment record
+- **[EMAIL_SETUP.md](EMAIL_SETUP.md)** - Configuration for email notifications (SMTP)
 
 ### ColabFold Integration
 - **[COLABFOLD_SETUP.md](COLABFOLD_SETUP.md)** - ColabFold setup for macOS (bare metal execution)
@@ -34,6 +35,7 @@ cd avnn-web-app
 docs/
 ├── DEPLOYMENT.md              # Advanced deployment guide
 ├── DEPLOYMENT_CHECKLIST.md    # Cleanup record and verification
+├── EMAIL_SETUP.md             # Email notification setup
 ├── COLABFOLD_SETUP.md         # macOS ColabFold setup
 ├── LOCAL_COLABFOLD_SETUP.md   # Local ColabFold integration
 └── DISABLE_COLABFOLD.md       # Running without ColabFold

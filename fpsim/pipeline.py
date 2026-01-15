@@ -133,36 +133,56 @@ class PipelineConfig:
 
 
 def ensure_af_pdb(config: PipelineConfig) -> Path:
-    """Ensure we have an AlphaFold PDB, either existing or newly predicted."""
+    """Ensure we have an AlphaFold structure, either existing or newly predicted."""
     if config.af_pdb is None:
-        # Check if ColabFold is handled externally (webapp)
-        if getattr(config, 'colabfold_external', False):
-            # Create a dummy PDB file for webapp context
-            cf_out = config.out_dir / "af_models"
+        if config.colabfold_external:
+            # Create a dummy structure file for webapp context
+            cf_out = config.out_dir / "colabfold"
             cf_out.mkdir(parents=True, exist_ok=True)
             dummy_pdb = cf_out / "dummy_webapp_structure.pdb"
             
             # Create a minimal PDB file with proper format
-            with open(dummy_pdb, 'w') as f:
-                f.write("HEADER    DUMMY STRUCTURE FROM WEBAPP    01-JAN-00   DUMMY\n")
-                f.write("ATOM      1  CA  ALA A   1      0.000   0.000   0.000  1.00 50.00           C\n")
-                f.write("ATOM      2  CA  GLY A   2      0.000   0.000   0.000  1.00 50.00           C\n")
-                f.write("ATOM      3  CA  VAL A   3      0.000   0.000   0.000  1.00 50.00           C\n")
-                f.write("END\n")
+            if not dummy_pdb.exists():
+                with open(dummy_pdb, 'w') as f:
+                    f.write("ATOM      1  N   MET A   1      -0.000   0.000   0.000  1.00 50.00           N\n")
+                    f.write("TER\n")
+                    f.write("END\n")
             
-            config.vprint(f"[webapp] Using dummy PDB for externally handled ColabFold: {dummy_pdb}")
+            config.vprint(f"[webapp] Using dummy structure for externally handled ColabFold: {dummy_pdb}")
             return dummy_pdb
-        
-        if not config.run_colabfold:
-            raise ValueError("Provide --af-pdb or set --run-colabfold to predict one.")
-        
-        cf_out = config.out_dir / "af_models"
-        
-        # Reuse existing PDB if allowed
-        if config.reuse and not config.force:
+        else:
+            if not config.run_colabfold:
+                raise ValueError("Provide --af-structure or set --run-colabfold to predict one.")
+            
+            cf_out = config.out_dir / "af_models"
+            
+            # Reuse existing structure if allowed
+            if config.reuse and not config.force:
+                existing = existing_ranked_pdb(cf_out)
+                if existing is not None:
+                    config.vprint(f"[reuse] Using existing structure: {existing}")
+                    return existing
+            
+            # Compose args from explicit flags
+            combined_args = build_colabfold_args(
+                config.colabfold_args, config.num_models, config.num_ensemble, 
+                config.num_recycle, config.model_type, config.max_seq, 
+                config.max_extra_seq, config.msa_mode, config.pair_mode, 
+                config.no_templates, config.use_gpu_relax
+            )
+            
+            try:
+                return run_colabfold_exec(config.fasta, cf_out, combined_args, config.gpu)
+            except Exception as e:
+                raise RuntimeError(f"ColabFold failed: {e}")
+    
+    elif config.af_pdb.is_dir():
+        cf_out = config.af_pdb
+        # Reuse existing structure if allowed
+        if config.run_colabfold: # Only try to reuse if colabfold is meant to run
             existing = existing_ranked_pdb(cf_out)
-            if existing is not None:
-                config.vprint(f"[reuse] Using existing PDB: {existing}")
+            if existing:
+                config.vprint(f"[reuse] Using existing structure: {existing}")
                 return existing
         
         # Compose args from explicit flags

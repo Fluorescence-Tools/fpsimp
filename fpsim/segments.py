@@ -131,7 +131,7 @@ def find_fp_domains(seq: str, lib: Dict[str, str], min_identity: float = 0.35, v
 
 
 def parse_plddt_from_pdb(pdb_path, chain_id: str) -> Dict[int, float]:
-    """Parse pLDDT from AlphaFold/ColabFold PDB B-factor column for a given chain.
+    """Parse pLDDT from AlphaFold/ColabFold PDB or mmCIF B-factor column for a given chain.
 
     Returns a mapping: residue index -> average pLDDT across atoms.
     """
@@ -140,27 +140,49 @@ def parse_plddt_from_pdb(pdb_path, chain_id: str) -> Dict[int, float]:
 
     if not isinstance(pdb_path, _Path):
         pdb_path = _Path(pdb_path)
+    
     plddt_sum: _Dict[int, float] = {}
     plddt_cnt: _Dict[int, int] = {}
-    with open(pdb_path, "r") as f:
-        for line in f:
-            if not (line.startswith("ATOM") or line.startswith("HETATM")):
-                continue
-            if len(line) < 66:
-                continue
-            ch = line[21].strip() if len(line) > 21 else ""
-            if chain_id and ch and ch != chain_id:
-                continue
-            try:
-                resseq = int(line[22:26])
-            except ValueError:
-                continue
-            try:
-                b = float(line[60:66])
-            except ValueError:
-                continue
-            plddt_sum[resseq] = plddt_sum.get(resseq, 0.0) + b
-            plddt_cnt[resseq] = plddt_cnt.get(resseq, 0) + 1
+    
+    sp = str(pdb_path).lower()
+    if sp.endswith(('.cif', '.mmcif')):
+        from Bio.PDB import MMCIFParser
+        parser = MMCIFParser(QUIET=True)
+        structure = parser.get_structure("struct", str(pdb_path))
+        for model in structure:
+            for chain in model:
+                if chain_id and chain.id != chain_id:
+                    continue
+                for residue in chain:
+                    resseq = residue.id[1]
+                    for atom in residue:
+                        b = atom.get_bfactor()
+                        plddt_sum[resseq] = plddt_sum.get(resseq, 0.0) + b
+                        plddt_cnt[resseq] = plddt_cnt.get(resseq, 0) + 1
+            break # only first model
+    else:
+        # PDB parsing (keep manual for speed/robustness)
+        from Bio.PDB import PDBParser # Just in case, though we use manual below
+        with open(pdb_path, "r") as f:
+            for line in f:
+                if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                    continue
+                if len(line) < 66:
+                    continue
+                ch = line[21].strip() if len(line) > 21 else ""
+                if chain_id and ch and ch != chain_id:
+                    continue
+                try:
+                    resseq = int(line[22:26])
+                except ValueError:
+                    continue
+                try:
+                    b = float(line[60:66])
+                except ValueError:
+                    continue
+                plddt_sum[resseq] = plddt_sum.get(resseq, 0.0) + b
+                plddt_cnt[resseq] = plddt_cnt.get(resseq, 0) + 1
+
     if not plddt_sum:
         raise ValueError(f"No pLDDT data found for chain '{chain_id}' in {pdb_path}")
     return {r: plddt_sum[r] / plddt_cnt[r] for r in sorted(plddt_sum.keys())}

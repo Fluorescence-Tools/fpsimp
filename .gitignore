@@ -70,7 +70,6 @@ test_*.py
 *.bak
 
 # Large data files
-*.pdb
 *.mrc
 *.pse
 

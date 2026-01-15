@@ -451,6 +451,7 @@ export function startStatusPolling() {
 
             if (data.status === 'completed' || data.status === 'failed') {
                 clearInterval(state.statusInterval);
+                const completedJobId = state.currentJobId; // Store ID before clearing
                 state.currentJobId = null; // Clear from state
 
                 // Save results URL for completed jobs
@@ -463,7 +464,7 @@ export function startStatusPolling() {
                 saveState();
 
                 if (data.status === 'completed') {
-                    loadResults();
+                    loadResults(completedJobId); // Pass ID explicitly
                     showSuccess('Job completed successfully!');
                 } else {
                     showError('Job failed: ' + (data.error || 'Unknown error'));
@@ -624,14 +625,7 @@ function updateProgressDetails(data, progressData) {
         }
     } else if (data.status === 'running' || data.status === 'colabfold_complete' || data.status === 'sampling_complete') {
         // Show current step and progress
-        if (progressData.current_step) {
-            const stepName = progressData.current_step.replace('_', ' ').toUpperCase();
-            html += `
-                <div class="alert alert-info mb-2">
-                    <strong><i class="fas fa-cog fa-spin me-2"></i>Current Step: ${stepName}</strong>
-                </div>
-            `;
-        }
+
 
         // Show CLI output
         if (progressData.cli_output && progressData.cli_output.length > 0) {
@@ -743,12 +737,18 @@ export async function cancelJob() {
     }
 }
 
-async function loadResults() {
+async function loadResults(jobId) {
     try {
-        const data = await fetchResults(state.currentJobId);
+        const idToUse = jobId || state.currentJobId;
+        if (!idToUse) {
+            console.error('No job ID available for loading results');
+            return;
+        }
+        const data = await fetchResults(idToUse);
         displayResults(data);
     } catch (error) {
         console.error('Failed to load results:', error);
+        showError('Failed to load results. Please check console.');
     }
 }
 
@@ -762,18 +762,29 @@ function displayResults(data) {
 
     downloadLinks.innerHTML = '';
 
-    data.files.forEach(file => {
-        if (file.type === 'rmf') {
-            const link = document.createElement('a');
-            // URL-encode the file path to handle subdirectories correctly
-            const encodedPath = encodeURIComponent(file.path);
-            link.href = `/api/download/${state.currentJobId}/${encodedPath}`;
-            link.className = 'btn btn-sm btn-outline-primary me-2 mb-2';
-            link.innerHTML = `<i class="fas fa-download me-1"></i>${file.name}`;
-            link.download = file.name; // Set download attribute to suggest filename
-            downloadLinks.appendChild(link);
+    if (data.files && Array.isArray(data.files) && data.files.length > 0) {
+        data.files.forEach(file => {
+            if (file.type === 'rmf') {
+                const link = document.createElement('a');
+                // URL-encode the file path to handle subdirectories correctly
+                const encodedPath = encodeURIComponent(file.path);
+                const jobId = data.job_id || state.currentJobId;
+                link.href = `/api/download/${jobId}/${encodedPath}`;
+                link.className = 'btn btn-sm btn-outline-primary me-2 mb-2';
+                link.innerHTML = `<i class="fas fa-download me-1"></i>${file.name}`;
+                link.download = file.name; // Set download attribute to suggest filename
+                downloadLinks.appendChild(link);
+            }
+        });
+    } else {
+        // Optionally show a message if no files are found, but keeping it empty is also fine
+        // or verify if data.error exists
+        if (data.error) {
+            showError('Error loading results: ' + data.error);
+        } else if (!data.files || data.files.length === 0) {
+            // Maybe show a placeholder
         }
-    });
+    }
 
     resultsSection.style.display = 'block';
 }

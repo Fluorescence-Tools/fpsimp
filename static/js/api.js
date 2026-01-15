@@ -12,10 +12,10 @@ export async function handleFileUpload(event) {
     setLoadingState(true);
 
     const formData = new FormData();
-    formData.append('fasta', file);
+    formData.append('file', file);
 
     try {
-        const response = await fetch('/api/upload', { method: 'POST', body: formData });
+        const response = await fetch('/api/upload_fasta', { method: 'POST', body: formData });
         const data = await response.json();
         if (response.ok) {
             // If we have multiple sequences, create separate structure entries for each
@@ -274,7 +274,7 @@ export async function clearSelectedStructures() {
     // Clear all localStorage data
     const { clearState } = await import('./persistence.js');
     clearState();
-    
+
     // Clear all sessionStorage data
     for (let i = 0; i < sessionStorage.length; i++) {
         const key = sessionStorage.key(i);
@@ -309,7 +309,7 @@ export async function clearSelectedStructures() {
 function resetAllFormFields() {
     // Reset numeric inputs
     const numericInputs = [
-        'numFrames', 'stepsPerFrame', 'membraneWeight', 'barrierRadius', 
+        'numFrames', 'stepsPerFrame', 'membraneWeight', 'barrierRadius',
         'kCenter', 'plddtThreshold', 'minRigidLength', 'beadSize'
     ];
     numericInputs.forEach(id => {
@@ -358,7 +358,7 @@ function resetAllFormFields() {
 
     // Reset checkboxes
     const checkboxes = [
-        'membrane', 'centerInitial', 'runColabfold', 'useStructurePlddt', 
+        'membrane', 'centerInitial', 'runColabfold', 'useStructurePlddt',
         'gpuRelax', 'measure'
     ];
     checkboxes.forEach(id => {

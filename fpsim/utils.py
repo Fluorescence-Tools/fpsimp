@@ -259,15 +259,42 @@ def extract_sequences_from_structure(structure_path: Path) -> dict:
     ppb = PPBuilder()
     seqs: dict[str, str] = {}
     
-    # Iterate over models and chains; concatenate polypeptides per chain
+    # Iterate over models and chains
     for model in structure:
         for chain in model:
-            polypeptides = ppb.build_peptides(chain)
-            if not polypeptides:
-                continue
-            seq = "".join(str(pp.get_sequence()) for pp in polypeptides)
-            if seq:
-                seqs[str(chain.id)] = seq
+            # For CIF, PPBuilder can be flaky. Use robust manual extraction if needed.
+            # But first try PPBuilder as it handles non-standard residues better in some cases.
+            try:
+                polypeptides = ppb.build_peptides(chain)
+                if polypeptides:
+                    seq = "".join(str(pp.get_sequence()) for pp in polypeptides)
+                    if seq:
+                        seqs[str(chain.id)] = seq
+                        continue
+            except Exception:
+                pass
+            
+            # Fallback: Manual extraction from CA/P atoms
+            # This is robust for C-alpha traces or simple structures
+            residues = sorted([r for r in chain], key=lambda r: r.id[1])
+            seq_chars = []
+            for r in residues:
+                # 3-letter to 1-letter
+                try:
+                    from Bio.PDB.Polypeptide import three_to_one
+                    # Ensure residue name is standard 3-letter code
+                    resname = r.get_resname()
+                    if len(resname) == 3:
+                        seq_chars.append(three_to_one(resname))
+                    else:
+                        seq_chars.append('X')
+                except Exception:
+                    # Handle non-standard or unknown
+                    seq_chars.append('X')
+            
+            if seq_chars:
+                seqs[str(chain.id)] = "".join(seq_chars)
+        
         break  # only first model
     return seqs
 

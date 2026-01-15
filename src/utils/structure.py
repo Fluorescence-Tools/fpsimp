@@ -109,7 +109,20 @@ def _create_structure_response(upload_id: str, filename: str, pdb_path: Path, se
             if 'fp_start' in fp_info: seq_data['fp_start'] = fp_info['fp_start']
             if 'fp_end' in fp_info: seq_data['fp_end'] = fp_info['fp_end']
             if 'dipole_triplets' in fp_info: seq_data['dipole_triplets'] = fp_info['dipole_triplets']
-            if 'fps' in fp_info: seq_data['fps'] = fp_info['fps']
+            if 'fps' in fp_info: 
+                seq_data['fps'] = fp_info['fps']
+            else:
+                # If no explicit 'fps' list but we have start/end (from alignment/motif), 
+                # create a single entry list for compatibility with viewer.js
+                # Note: viewer.js expects 0-based indices for start/end in the fps list
+                if 'fp_start' in fp_info and 'fp_end' in fp_info:
+                    seq_data['fps'] = [{
+                        'name': fp_info['name'],
+                        'start': fp_info['fp_start'] - 1, # Convert 1-based to 0-based
+                        'end': fp_info['fp_end'] - 1,     # Convert 1-based to 0-based
+                        'color': fp_info['color'],
+                        'dipole_triplets': fp_info.get('dipole_triplets', [])
+                    }]
         sequences.append(seq_data)
 
     return jsonify({

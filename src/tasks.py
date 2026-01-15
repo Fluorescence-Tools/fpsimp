@@ -36,6 +36,7 @@ def run_colabfold_task(self, fasta_path: str, output_dir: str, extra_args: str =
         
         # Update job status
         redis_client.hset(f"job:{job_id}", "status", JobStatus.COLABFOLD_RUNNING)
+        redis_client.hset(f"job:{job_id}", "current_step", "colabfold")
         redis_client.hset(f"job:{job_id}", "colabfold_started_at", datetime.now().isoformat())
         
         # Run ColabFold container
@@ -77,7 +78,7 @@ def run_pipeline_task(self, job_id: str, config_dict: Dict[str, Any], colabfold_
         # Update job status to running
         redis_client.hset(f"job:{job_id}", "status", JobStatus.RUNNING)
         redis_client.hset(f"job:{job_id}", "pipeline_started_at", datetime.now().isoformat())
-        redis_client.hset(f"job:{job_id}", "worker_id", self.request.id)
+        redis_client.hset(f"job:{job_id}", "worker_id", self.request.id or 'manual')
 
         # If ColabFold result is provided, update config
         if colabfold_result:
@@ -92,7 +93,13 @@ def run_pipeline_task(self, job_id: str, config_dict: Dict[str, Any], colabfold_
                 config_dict[param] = Path(str(config_dict[param]))
 
         # Create PipelineConfig from dict
-        config_obj = PipelineConfig(**config_dict)
+        def update_step_status(step_name):
+            try:
+                redis_client.hset(f"job:{job_id}", "current_step", step_name)
+            except Exception as e:
+                print(f"Failed to update step status: {e}")
+
+        config_obj = PipelineConfig(**config_dict, status_callback=update_step_status)
 
         # Run the pipeline
         outputs = run_fpsim_pipeline(config_obj)
@@ -138,7 +145,7 @@ def run_fpsim_job(self, job_id: str, config_dict: Dict[str, Any]):
         redis_client.hset(f"job:{job_id}", "status", JobStatus.RUNNING)
         redis_client.hset(f"job:{job_id}", "started_at", datetime.now().isoformat())
         redis_client.hset(f"job:{job_id}", "heartbeat", datetime.now().isoformat())
-        redis_client.hset(f"job:{job_id}", "worker_id", self.request.id)
+        redis_client.hset(f"job:{job_id}", "worker_id", self.request.id or 'manual')
         
         # Convert all path parameters to Path objects
         from pathlib import Path

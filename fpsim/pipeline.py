@@ -80,7 +80,8 @@ class PipelineConfig:
         measure_plot: bool = True,
         measure_plot_out: Optional[Path] = None,
         measure_frame_start: int = 0,
-        measure_max_frames: Optional[int] = None
+        measure_max_frames: Optional[int] = None,
+        status_callback = None
     ):
         self.fasta = fasta
         self.out_dir = out_dir
@@ -130,6 +131,7 @@ class PipelineConfig:
         self.measure_plot_out = measure_plot_out
         self.measure_frame_start = measure_frame_start
         self.measure_max_frames = measure_max_frames
+        self.status_callback = status_callback or (lambda x: None)
 
 
 def ensure_af_pdb(config: PipelineConfig) -> Path:
@@ -254,6 +256,7 @@ def process_multimer_workflow(config: PipelineConfig, af_pdb: Path, seq_id_raw: 
     if config.reuse and not config.force and has_sampling_outputs(config.out_dir):
         config.vprint("[reuse] Sampling outputs found. Skipping IMP sampling.")
     else:
+        config.status_callback("sampling")
         run_imp_sampling(
             top_path, pdb_dir, config.out_dir, 
             steps_per_frame=config.steps_per_frame, frames=config.frames,
@@ -485,6 +488,7 @@ def process_single_chain_workflow(config: PipelineConfig, af_pdb: Path, seq_id_r
     
     # Run sampling
     pdb_dir = af_pdb.parent
+    config.status_callback("sampling")
     run_imp_sampling(
         top_path, pdb_dir, config.out_dir, 
         steps_per_frame=config.steps_per_frame, frames=config.frames,
@@ -611,6 +615,7 @@ def run_fpsim_pipeline(config: PipelineConfig) -> Dict[str, Path]:
         top_path = process_single_chain_workflow(config, af_pdb, seq_id_raw, seq_raw)
     
     # Step 4: Execute measurement step if enabled
+    config.status_callback("measurements")
     measurement_results = run_measurement_step(config, config.out_dir)
     
     results = {

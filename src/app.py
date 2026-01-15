@@ -5,7 +5,7 @@ Main application entry point - Orchestrates modular components
 """
 import os
 import redis
-from flask import Flask
+from flask import Flask, request
 from jinja2 import Environment, FileSystemLoader
 from flask_cors import CORS
 from celery import Celery
@@ -20,7 +20,7 @@ CORS(app)
 # Ensure proper MIME types for ES6 modules
 @app.after_request
 def after_request(response):
-    if response.path.endswith('.js'):
+    if request.path.endswith('.js'):
         response.mimetype = 'application/javascript'
     return response
 
@@ -37,7 +37,10 @@ def render_static_template(template_name, **context):
         return flask_url_for(endpoint, **kwargs)
         
     template = template_env.get_template(template_name)
-    return template.render(url_for=url_for, **context)
+    # config is available globally to templates via context processor or we pass it if not present in context
+    if 'config' not in context:
+        context['config'] = config
+    return template.render(url_for=url_for, app=app, **context)
 
 # 4. Celery Initialization
 celery = Celery(app.import_name)
@@ -45,13 +48,19 @@ app.config.from_object(config)
 celery.config_from_object(config)
 
 # 5. Redis Initialization
-redis_client = redis.Redis(
-    host=os.getenv('REDIS_HOST', 'redis') if not os.getenv('REDIS_URL') else None,
-    port=6379 if not os.getenv('REDIS_URL') else None,
-    url=config.broker_url,
-    db=1,
-    decode_responses=True
-)
+if os.getenv('REDIS_URL'):
+    redis_client = redis.from_url(
+        os.getenv('REDIS_URL'),
+        db=1,
+        decode_responses=True
+    )
+else:
+    redis_client = redis.Redis(
+        host=os.getenv('REDIS_HOST', 'redis'),
+        port=int(os.getenv('REDIS_PORT', '6379')),
+        db=1,
+        decode_responses=True
+    )
 
 # 6. Custom Jinja2 filters
 from utils.general import format_file_size

@@ -186,10 +186,11 @@ def submit_job():
             'fasta_filename': fasta_path.name,
             'parameters': json.dumps(params),
             'membrane_regions': json.dumps(data.get('membrane_regions', [])),
-            'email': data.get('email', '')
+            'email': data.get('email') or '' # Handle None if email: null is sent
         }
         
         for key, value in job_metadata.items():
+            if value is None: value = '' # Extra safety
             redis_client.hset(f"job:{job_id}", key, value)
         
         serializable_config = {}
@@ -267,15 +268,40 @@ def get_job_status_legacy(job_id: str):
             progress_info['estimated_wait_formatted'] = format_duration(progress_info['estimated_wait_seconds'])
     
     elif status == 'running':
-        current_step = job_data.get('current_step', None)
+        current_step = job_data.get('current_step', 'unknown')
         progress_info['current_step'] = current_step
-        step_progress = {'colabfold': 20, 'sampling': 50, 'measurements': 30}
-        if current_step in step_progress:
-            progress_info['progress_percent'] = step_progress[current_step]
+        
+        # Calculate weighted progress
+        # ColabFold: 0-10%
+        # Sampling: 10-90%
+        # Measurements/Analysis: 90-100%
+        
+        base_progress = 0
+        step_progress = 0
+        
+        if current_step == 'colabfold':
+            base_progress = 0
+            # We don't have detailed progress for ColabFold, so we fake it or check logs
+            # For now, just say 5%
+            step_progress = 5
+        elif current_step == 'sampling':
+            base_progress = 10
+            # Get actual sampling progress
+            sampling_progress = get_job_cli_output(job_id) # Using this just to check logs if needed, but we used get_sampling_progress
+            from services.log_service import get_sampling_progress
+            sp = get_sampling_progress(job_id)
+            if sp:
+                # Scale 0-100% of sampling to 0-80% of total
+                step_progress = int(sp.get('progress_percent', 0) * 0.8)
+        elif current_step == 'measurements':
+            base_progress = 90
+            step_progress = 5
+            
+        progress_info['progress_percent'] = base_progress + step_progress
         progress_info['cli_output'] = get_job_cli_output(job_id)
     
     elif status in ['colabfold_complete', 'sampling_complete', 'completed']:
-        progress_info['progress_percent'] = {'colabfold_complete': 30, 'sampling_complete': 80, 'completed': 100}.get(status, 100)
+        progress_info['progress_percent'] = {'colabfold_complete': 10, 'sampling_complete': 90, 'completed': 100}.get(status, 100)
         progress_info['cli_output'] = get_job_cli_output(job_id)
     
     job_data['progress'] = progress_info
@@ -433,9 +459,59 @@ def get_job_diagnostics(job_id: str):
     
     try:
         inspect = celery.control.inspect(timeout=5.0)
+        # Check active tasks
         active = inspect.active()
+        # Check online workers (ping)
+        ping = inspect.ping()
+        
+        workers_detected = 0
+        worker_names = []
+        
+        if ping:
+            worker_names = list(ping.keys())
+            workers_detected = len(worker_names)
+        elif active:
+            # Fallback to active if ping fails but active returns something
+            worker_names = list(active.keys())
+            workers_detected = len(worker_names)
+        
+        # Fallback: If no workers detected via inspect, but we have RUNNING jobs with recent heartbeat,
+        # then we know at least one worker is alive.
+        if workers_detected == 0 and diagnostics['counts']['RUNNING'] > 0:
+            # Check for recent heartbeats in the running jobs
+            import time
+            current_ts = time.time()
+            recent_activity = False
+            
+            for job_id in diagnostics['jobs']['running']:
+                job_key = f"job:{job_id}"
+                hb = redis_client.hget(job_key, "heartbeat")
+                if hb:
+                    try:
+                        # Heartbeat is usually isoformat string
+                        hb_ts = datetime.datetime.fromisoformat(hb).timestamp()
+                        if current_ts - hb_ts < 120:  # Within last 2 minutes
+                            recent_activity = True
+                            break
+                    except: pass
+            
+            if recent_activity:
+                workers_detected = 1
+                worker_names = ['worker-inferred-from-activity']
+            
+        active_tasks_count = 0
         if active:
-            diagnostics['worker_info'] = {'workers_detected': len(active), 'worker_names': list(active.keys()), 'active_tasks': sum(len(t) for t in active.values())}
+            active_tasks_count = sum(len(t) for t in active.values())
+        # If we inferred a worker, we assume it's running the number of running jobs
+        elif workers_detected > 0 and active_tasks_count == 0:
+             active_tasks_count = diagnostics['counts']['RUNNING']
+            
+        if workers_detected > 0:
+            diagnostics['worker_info'] = {
+                'workers_detected': workers_detected, 
+                'worker_names': worker_names, 
+                'active_tasks': active_tasks_count
+            }
     except: pass
     
     return jsonify(diagnostics)
@@ -465,7 +541,7 @@ def cleanup_stale_jobs():
         return jsonify({'success': True, 'cleaned_count': len(cleaned)})
     except Exception as e: return jsonify({'error': str(e)}), 500
 
-@jobs_bp.route('/api/cancel/<job_id>', methods=['POST'])
+@jobs_bp.route('/api/job_cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id: str):
     """Cancel a running job"""
     from app import redis_client, celery
@@ -481,14 +557,20 @@ def cancel_job(job_id: str):
 
 @jobs_bp.route('/api/job_sampling_log/<job_id>')
 def get_job_sampling_log(job_id: str):
-    """Get IMP sampling log"""
+    """Get IMP sampling log with parsing for progress"""
     log_file = current_app.config['RESULTS_FOLDER'] / job_id / 'sampling.log'
     if not log_file.exists(): return jsonify({'error': 'Sampling log not found'}), 404
     
     try:
-        with open(log_file, 'r') as f:
-            lines = f.readlines()
-            return jsonify({'log': [line.strip() for line in lines[-200:] if line.strip()]})
+        from services.log_service import get_sampling_progress
+        progress_data = get_sampling_progress(job_id)
+        
+        return jsonify({
+            'log': progress_data.get('log_subset', ''),
+            'current_frame': progress_data.get('current_frame', 0),
+            'total_frames': progress_data.get('total_frames', 100000),
+            'progress_percent': progress_data.get('progress_percent', 0)
+        })
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @jobs_bp.route('/api/results/<job_id>')

@@ -13,9 +13,10 @@
     <style>
         body {
             position: relative;
-            margin-top: 0; /* Remove margin since logo is now in navbar */
+            margin-top: 0;
+            /* Remove margin since logo is now in navbar */
         }
-        
+
         /* Logo inside navbar */
         .navbar-logo {
             width: 170px;
@@ -32,27 +33,28 @@
             left: 0px;
             z-index: 1000;
         }
-        
+
         .navbar-brand {
             display: flex;
             align-items: center;
-            padding-left: 150px; /* Make space for logo */
+            padding-left: 150px;
+            /* Make space for logo */
             min-height: 50px;
         }
-        
+
         /* Adjust navbar to accommodate logo */
         .navbar {
             min-height: 60px;
             position: relative;
         }
-        
+
         /* Constrain content width on wide screens */
         .container-fluid {
             max-width: 1400px;
             padding-left: 40px;
             padding-right: 40px;
         }
-        
+
         @media (max-width: 768px) {
             .container-fluid {
                 padding-left: 20px;
@@ -615,6 +617,7 @@
                 <!-- Submit Job Button -->
                 <div class="card mt-4">
                     <div class="card-body">
+                        {% if config.SMTP_ENABLED %}
                         <!-- Email Notification -->
                         <div class="mb-3">
                             <label for="emailInput" class="form-label">
@@ -623,6 +626,7 @@
                             <input type="email" class="form-control" id="emailInput" placeholder="your@email.com">
                             <div class="form-text">Receive email notifications when your job completes or fails.</div>
                         </div>
+                        {% endif %}
                         <div class="d-grid">
                             <button type="submit" class="btn btn-primary btn-lg" form="parametersForm">
                                 <i class="fas fa-play me-2"></i>Submit Job

@@ -46,10 +46,12 @@ def upload_fasta():
 @files_bp.route('/api/upload_pdb', methods=['POST'])
 def upload_pdb():
     """Upload PDB/mmCIF file"""
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+    # Support both 'file' (original) and 'pdb' (used in frontend) keys
+    file = request.files.get('file') or request.files.get('pdb')
     
-    file = request.files['file']
+    if not file:
+        return jsonify({'error': 'No file part (expected "file" or "pdb" key)'}), 400
+    
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
     

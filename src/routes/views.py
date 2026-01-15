@@ -25,11 +25,41 @@ def results_page(job_id: str):
     # Get results if job is completed
     status = job_data.get('status', 'unknown')
     results = None
+    all_files = []
+    
     if status == JobStatus.COMPLETED:
         try:
             results = json.loads(job_data.get('outputs', '{}'))
         except:
             results = {}
+            
+        # List all files in job directory for display
+        job_dir = current_app.config['RESULTS_FOLDER'] / job_id
+        if job_dir.exists():
+            for f in job_dir.rglob('*'):
+                if f.is_file():
+                    rel_path = f.relative_to(job_dir)
+                    
+                    # Format size
+                    size_bytes = f.stat().st_size
+                    for unit in ['B', 'KB', 'MB', 'GB']:
+                        if size_bytes < 1024:
+                            size_formatted = f"{size_bytes:.1f} {unit}"
+                            break
+                        size_bytes /= 1024
+                    else:
+                        size_formatted = f"{size_bytes:.1f} TB"
+                        
+                    all_files.append({
+                        'name': f.name,
+                        'path': str(rel_path),
+                        'extension': f.suffix.lower(),
+                        'size_formatted': size_formatted,
+                        'size': f.stat().st_size
+                    })
+            
+            # Sort files by name (directories/groups typically handled by table sorting if implemented, but simple sort here)
+            all_files.sort(key=lambda x: x['name'])
             
     return render_static_template(
         'results.html',
@@ -37,5 +67,7 @@ def results_page(job_id: str):
         status=status,
         job_data=job_data,
         results=results,
-        config=current_app.config
+        all_files=all_files,
+        config=current_app.config,
+        JobStatus=JobStatus
     )

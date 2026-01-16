@@ -1,6 +1,6 @@
 import { initializeEventListeners } from './events.js';
-import { initializeViewer } from './viewer.js';
 import { renderSelectedStructures, populateSequenceSelectorFromAllStructures, updateRegionCount } from './ui.js';
+import { visualizeStructure } from './visualization.js';
 import { loadState, setupAutoSave, saveState } from './persistence.js';
 import { startStatusPolling } from './monitoring.js';
 import { initializeColabFoldUI } from './colabfold-ui.js';
@@ -83,8 +83,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initialize ColabFold UI based on configuration
     initializeColabFoldUI();
 
-    // Initialize 3D viewer (non-blocking)
+    // Initialize 3D viewer (non-blocking) - just check availability
     try {
+        const { initializeViewer } = await import('./viewer.js');
         const available = await initializeViewer();
         if (available) {
             console.log('3D viewer initialized successfully');
@@ -158,7 +159,6 @@ async function restoreJobStatus() {
 // Reconstruct 3D viewer from saved state
 async function reconstructViewer() {
     const { state } = await import('./state.js');
-    const { showStructurePreview } = await import('./viewer.js');
 
     // Find the selected structure or the first PDB structure
     let structureToShow = null;
@@ -171,16 +171,7 @@ async function reconstructViewer() {
     }
 
     if (structureToShow && structureToShow.file_url) {
-        try {
-            console.log('Reconstructing 3D viewer for:', structureToShow.filename);
-            await showStructurePreview(
-                structureToShow.file_url,
-                structureToShow.filename,
-                structureToShow.sequences
-            );
-        } catch (error) {
-            console.warn('Failed to reconstruct 3D viewer:', error);
-        }
+        await visualizeStructure(structureToShow);
     }
 }
 

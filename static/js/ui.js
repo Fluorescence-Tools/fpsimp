@@ -696,3 +696,294 @@ export function renderStructuresList() {
 export function renderSelectedStructures() {
     renderStructuresList();
 }
+
+/**
+ * Render the Topology Table (PMI style) based on segments
+ * @param {string} containerId - DOM ID of the container
+ * @param {Object} segmentsByChain - Dict {chainId: [segmentObjects]}
+ */
+export const PMI_COLORS = {
+    "Amethyst": "#F0A3FF",
+    "Blue": "#0075DC",
+    "Caramel": "#993F00",
+    "Damson": "#4C005C",
+    "Ebony": "#191919",
+    "Forest": "#005C31",
+    "Green": "#2BCE48",
+    "Honeydew": "#FFCC99",
+    "Iron": "#808080",
+    "Jade": "#94FFB5",
+    "Khaki": "#8F7C00",
+    "Lime": "#9DCC00",
+    "Mallow": "#C20088",
+    "Navy": "#003380",
+    "Orpiment": "#FFA405",
+    "Pink": "#FFA8BB",
+    "Quagmire": "#426600",
+    "Red": "#FF0010",
+    "Sky": "#5EF1F2",
+    "Turquoise": "#00998F",
+    "Uranium": "#E0FF66",
+    "Violet": "#740AFF",
+    "Wine": "#990000",
+    "Xanthin": "#FFFF80",
+    "Yellow": "#FFFF00",
+    "Zinnia": "#FF5005",
+    "Gray": "#808080" // Default fallback
+};
+
+export function renderTopologyTable(containerId, segmentsByChain, onSegmentChange = null) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Capture focus before re-render
+    let focusedElementState = null;
+    if (document.activeElement && container.contains(document.activeElement)) {
+        const el = document.activeElement;
+        if (el.classList.contains('seg-input')) {
+            focusedElementState = {
+                chain: el.dataset.chain,
+                idx: el.dataset.idx,
+                field: el.dataset.field
+            };
+        }
+    }
+
+    // Flatten segments for table
+    const flatSegments = [];
+    const sortedChains = Object.keys(segmentsByChain).sort();
+
+    sortedChains.forEach(chainId => {
+        const segments = segmentsByChain[chainId];
+        segments.forEach((seg, idx) => {
+            flatSegments.push({
+                chain: chainId,
+                idx: idx, // Index in the chain array
+                id: idx + 1,
+                name: seg.name || (seg.kind === 'core' ? `Rigid ${idx + 1}` : `Linker ${idx + 1}`),
+                start: seg.start,
+                end: seg.end,
+                length: seg.end - seg.start + 1,
+                kind: seg.kind,
+                representation: seg.representation || (['core', 'fp'].includes(seg.kind) ? 'rigid_body' : 'bead'),
+                color: seg.color || (seg.kind === 'fp' ? 'Green' : (seg.kind === 'linker' ? 'Orpiment' : 'Gray')),
+                isFirst: idx === 0,
+                isLast: idx === segments.length - 1
+            });
+        });
+    });
+
+    if (flatSegments.length === 0) {
+        container.innerHTML = '<p class="text-muted">No segmentation data available.</p>';
+        return;
+    }
+
+    // Build Table HTML
+    let html = `
+    <div class="table-responsive">
+        <table class="table table-sm table-striped table-hover align-middle" style="font-size: 0.9rem;">
+            <thead class="table-light">
+                <tr>
+                    <th>Chain</th>
+                    <th>Type</th>
+                    <th>Representation</th>
+                    <th>Color</th>
+                    <th>Name</th>
+                    <th style="width: 100px;">Start</th>
+                    <th style="width: 100px;">End</th>
+                    <th>Length</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    flatSegments.forEach((row, rowIndex) => {
+        let badgeClass = 'bg-secondary';
+        let kindLabel = 'Core'; // Default for rigid/core
+
+        if (row.kind === 'linker') {
+            badgeClass = 'bg-warning text-dark';
+            kindLabel = 'Flexible Linker';
+        } else if (row.kind === 'fp') {
+            badgeClass = 'bg-success';
+            kindLabel = 'Fluorescent Protein';
+        }
+
+        // Inputs
+        let startInput = `${row.start}`;
+        let endInput = `${row.end}`;
+        let repInput = row.representation === 'rigid_body' ? 'Rigid Body' : 'Bead';
+        let colorInput = row.color;
+
+        if (onSegmentChange) {
+            // Identifier for event handling
+            const dataAttrs = `data-chain="${row.chain}" data-idx="${row.idx}"`;
+
+            startInput = `<input type="number" class="form-control form-control-sm seg-input" ${dataAttrs} data-field="start" value="${row.start}" min="1">`;
+            endInput = `<input type="number" class="form-control form-control-sm seg-input" ${dataAttrs} data-field="end" value="${row.end}" min="1">`;
+
+            // Representation Dropdown
+            repInput = `
+                <select class="form-select form-select-sm seg-input" ${dataAttrs} data-field="representation">
+                    <option value="rigid_body" ${row.representation === 'rigid_body' ? 'selected' : ''}>Rigid Body</option>
+                    <option value="bead" ${row.representation === 'bead' ? 'selected' : ''}>Bead</option>
+                </select>
+            `;
+
+            // Color Dropdown
+            // Sort colors by name
+            const colorOptions = Object.keys(PMI_COLORS).sort().map(name => {
+                const hex = PMI_COLORS[name];
+                // Check if current row color matches name or hex (case insensitive)
+                const isSelected = (row.color && (row.color.toLowerCase() === name.toLowerCase() || row.color.toLowerCase() === hex.toLowerCase()));
+                return `<option value="${hex}" ${isSelected ? 'selected' : ''} style="background-color: ${hex}; color: ${isLight(hex) ? 'black' : 'white'};">${name}</option>`;
+            }).join('');
+
+            // Determine initial style for the select element
+            const currentColor = row.color || 'gray';
+            // Get hex color, handling case-insensitive match if needed, fallback to gray
+            let initialBg = '#808080';
+            if (currentColor !== 'gray') {
+                // Try direct lookup
+                if (PMI_COLORS[currentColor]) initialBg = PMI_COLORS[currentColor];
+                else {
+                    // Try case-insensitive lookup
+                    const match = Object.keys(PMI_COLORS).find(k => k.toLowerCase() === currentColor.toLowerCase());
+                    if (match) initialBg = PMI_COLORS[match];
+                    else initialBg = currentColor; // Assume it's a hex or valid color string
+                }
+            }
+
+            const initialText = isLight(initialBg) ? 'black' : 'white';
+
+            colorInput = `
+                <select class="form-select form-select-sm seg-input" ${dataAttrs} data-field="color" style="width: 120px; background-color: ${initialBg}; color: ${initialText};">
+                    <option value="gray" style="background-color: #808080; color: white;">Default</option>
+                    ${colorOptions}
+                </select>
+            `;
+        }
+
+        html += `
+            <tr>
+                <td><b>${row.chain}</b></td>
+                <td><span class="badge ${badgeClass}">${kindLabel}</span></td>
+                <td>${repInput}</td>
+                <td>${colorInput}</td>
+                <td>${row.name}</td>
+                <td>${startInput}</td>
+                <td>${endInput}</td>
+                <td>${row.length}</td>
+            </tr>
+        `;
+    });
+
+    html += `
+            </tbody>
+        </table>
+    </div>
+    `;
+
+    container.innerHTML = html;
+
+    // Attach Event Listeners if interactive
+    if (onSegmentChange) {
+        const inputs = container.querySelectorAll('.seg-input');
+
+        // Restore focus if we had it
+        if (focusedElementState) {
+            const selector = `.seg-input[data-chain="${focusedElementState.chain}"][data-idx="${focusedElementState.idx}"][data-field="${focusedElementState.field}"]`;
+            const elToFocus = container.querySelector(selector);
+            if (elToFocus) {
+                // Determine cursor position? 
+                // Standard focus is usually end of text.
+                // Since this is number input, just focus.
+                elToFocus.focus();
+            }
+        }
+
+        inputs.forEach(input => {
+            input.addEventListener('change', (e) => {
+                const chainId = e.target.dataset.chain;
+                const idx = parseInt(e.target.dataset.idx);
+                const field = e.target.dataset.field; // 'start', 'end', 'representation', 'color'
+                let newValue = e.target.value;
+
+                // Deep copy segments for this chain to modify
+                const chainSegments = JSON.parse(JSON.stringify(segmentsByChain[chainId]));
+                const segment = chainSegments[idx];
+
+                if (field === 'start' || field === 'end') {
+                    newValue = parseInt(newValue);
+                    if (isNaN(newValue)) return;
+
+                    if (field === 'start') {
+                        // Changing Start implies changing End of Previous Segment (if exists)
+                        if (idx > 0) {
+                            const prevSeg = chainSegments[idx - 1];
+                            // Validate: New Start must be > PrevSeg Start
+                            if (newValue <= prevSeg.start) {
+                                alert(`Start value must be greater than previous segment start (${prevSeg.start})`);
+                                e.target.value = segment.start; // Reset
+                                return;
+                            }
+                            // Update Previous End
+                            prevSeg.end = newValue - 1;
+                        }
+                        // Update Current Start
+                        segment.start = newValue;
+                    } else if (field === 'end') {
+                        // Changing End implies changing Start of Next Segment (if exists)
+                        if (idx < chainSegments.length - 1) {
+                            const nextSeg = chainSegments[idx + 1];
+                            // Validate: New End must be < NextSeg End
+                            if (newValue >= nextSeg.end) {
+                                alert(`End value must be less than next segment end (${nextSeg.end})`);
+                                e.target.value = segment.end; // Reset
+                                return;
+                            }
+                            // Update Next Start
+                            nextSeg.start = newValue + 1;
+                        }
+                        // Update Current End
+                        segment.end = newValue;
+                    }
+
+                    // Final Validity Check: start <= end for modified segments
+                    if (segment.start > segment.end) {
+                        alert(`Invalid segment: Start (${segment.start}) > End (${segment.end})`);
+                        renderTopologyTable(containerId, segmentsByChain, onSegmentChange);
+                        return;
+                    }
+                } else if (field === 'representation') {
+                    segment.representation = newValue;
+                } else if (field === 'color') {
+                    segment.color = newValue;
+                    // Update visual feedback (if it's a select element)
+                    if (e.target.tagName === 'SELECT') {
+                        e.target.style.backgroundColor = newValue;
+                        e.target.style.color = isLight(newValue) ? 'black' : 'white';
+                    }
+                }
+
+                // Propagate Change
+                onSegmentChange(chainId, chainSegments);
+            });
+        });
+    }
+}
+
+function isLight(color) {
+    if (color && color.startsWith('#')) {
+        const hex = color.replace('#', '');
+        const r = parseInt(hex.substr(0, 2), 16);
+        const g = parseInt(hex.substr(2, 2), 16);
+        const b = parseInt(hex.substr(4, 2), 16);
+        const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+        return yiq >= 128;
+    }
+    return true;
+}
+
+if (!window.ui) window.ui = {};
+window.ui.renderTopologyTable = renderTopologyTable;

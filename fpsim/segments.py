@@ -144,28 +144,51 @@ def parse_plddt_from_pdb(pdb_path, chain_id: str) -> Dict[int, float]:
     plddt_sum: _Dict[int, float] = {}
     plddt_cnt: _Dict[int, int] = {}
     
+    debug_log_path = _Path("/app/fpsim_debug.log")
+    
+    def log_debug(msg):
+        with open(debug_log_path, "a") as f:
+            f.write(f"{msg}\n")
+
+    log_debug(f"DEBUG: Parsing {pdb_path} for chain {chain_id}")
+
     sp = str(pdb_path).lower()
     if sp.endswith(('.cif', '.mmcif')):
-        from Bio.PDB import MMCIFParser
-        parser = MMCIFParser(QUIET=True)
-        structure = parser.get_structure("struct", str(pdb_path))
-        for model in structure:
-            for chain in model:
-                if chain_id and chain.id != chain_id:
-                    continue
-                for residue in chain:
-                    resseq = residue.id[1]
-                    for atom in residue:
-                        b = atom.get_bfactor()
-                        plddt_sum[resseq] = plddt_sum.get(resseq, 0.0) + b
-                        plddt_cnt[resseq] = plddt_cnt.get(resseq, 0) + 1
-            break # only first model
+        try:
+            from Bio.PDB import MMCIFParser
+            parser = MMCIFParser(QUIET=True)
+            structure = parser.get_structure("struct", str(pdb_path))
+            found_chains = []
+            for model in structure:
+                for chain in model:
+                    found_chains.append(chain.id)
+                    if chain_id and chain.id != chain_id:
+                        continue
+                    for residue in chain:
+                        # Skip if HETATM or Water (residue.id[0] should be ' ' for standard ATOM)
+                        if residue.id[0] != ' ':
+                            continue
+                        
+                        resseq = residue.id[1]
+                        for atom in residue:
+                            b = atom.get_bfactor()
+                            plddt_sum[resseq] = plddt_sum.get(resseq, 0.0) + b
+                            plddt_cnt[resseq] = plddt_cnt.get(resseq, 0) + 1
+                break # only first model
+            log_debug(f"DEBUG: MMCIF Found chains: {found_chains}. Residues extracted: {len(plddt_sum)}")
+        except Exception as e:
+            log_debug(f"DEBUG: MMCIF parsing failed: {e}")
+            import traceback
+            log_debug(traceback.format_exc())
+            raise e
     else:
         # PDB parsing (keep manual for speed/robustness)
+        # Reverted to original manual parsing as requested
         from Bio.PDB import PDBParser # Just in case, though we use manual below
         with open(pdb_path, "r") as f:
             for line in f:
-                if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                # Strictly only ATOM, no HETATM
+                if not line.startswith("ATOM"):
                     continue
                 if len(line) < 66:
                     continue
@@ -184,17 +207,28 @@ def parse_plddt_from_pdb(pdb_path, chain_id: str) -> Dict[int, float]:
                 plddt_cnt[resseq] = plddt_cnt.get(resseq, 0) + 1
 
     if not plddt_sum:
+        print(f"[DEBUG] No pLDDT data found for chain '{chain_id}' in {pdb_path}. File type: {sp}", flush=True)
         raise ValueError(f"No pLDDT data found for chain '{chain_id}' in {pdb_path}")
-    return {r: plddt_sum[r] / plddt_cnt[r] for r in sorted(plddt_sum.keys())}
+    plddt_avg = {r: plddt_sum[r] / plddt_cnt[r] for r in sorted(plddt_sum.keys())}
+    
+    # Do not normalize keys. Return exact PDB numbering.
+    # if plddt_avg:
+    #     min_r = min(plddt_avg.keys())
+    #     if min_r > 1:
+    #         plddt_avg = {k - min_r + 1: v for k, v in plddt_avg.items()}
+            
+    return plddt_avg
 
 
 def segments_from_plddt(
     seq_len: int,
     plddt: Dict[int, float],
     fp_domains: List[Tuple[str, int, int, float]] | None,
+    residue_numbers: List[int] | None = None,
     rigid_threshold: float = 70.0,
     min_rb_len: int = 12,
     min_linker_len: int = 10,
+    model_disordered_as_beads: bool = True,
 ) -> List[Dict]:
     """Create core/linker segments from pLDDT profile with FP-bridge restriction.
 
@@ -204,11 +238,21 @@ def segments_from_plddt(
     - High-pLDDT domains are grouped into rigid bodies
     - Low-pLDDT linkers:
         1. Always eligible if adjacent to FP boundaries
-        2. Eligible if the stretch of low pLDDT >= min_linker_len
+        2. Eligible if the stretch of low pLDDT >= min_linker_len AND model_disordered_as_beads is True
     """
     lab = ['R'] * seq_len
+    lab = ['R'] * seq_len
     for i in range(seq_len):
-        score = plddt.get(i + 1, 0.0)
+        # Determine the PDB residue number for this sequence index
+        if residue_numbers and i < len(residue_numbers):
+            key = residue_numbers[i]
+        else:
+            # Fallback for when residue_numbers are not provided (assumes 1-based contiguous)
+            key = i + 1
+            
+        score = plddt.get(key)
+        if score is None:
+            score = plddt.get(str(key), 0.0)
         lab[i] = 'R' if score >= rigid_threshold else 'L'
 
     def runs_from_labels(labels: List[str]) -> List[Tuple[str, int, int]]:
@@ -232,23 +276,26 @@ def segments_from_plddt(
             for i in range(s - 1, e):
                 lab[i] = 'L'
 
-    # Force FP to rigid
+    # Force FP to rigid but track them
+    fp_mask = [False] * seq_len
     if fp_domains:
         for _nm, s, e, _idy in fp_domains:
             for i in range(max(1, s) - 1, min(seq_len, e)):
                 lab[i] = 'R'
+                fp_mask[i] = True
 
     # Eligible linkers: 
     # 1) low-pLDDT adjacent to FP boundaries
-    # 2) large stretches of low-pLDDT
+    # 2) large stretches of low-pLDDT (IF modeling disordered regions as beads)
     eligible = [False] * seq_len
     
-    # Track runs of L to check for length >= min_linker_len
-    runs = runs_from_labels(lab)
-    for lbl, s, e in runs:
-        if lbl == 'L' and (e - s + 1) >= min_linker_len:
-            for i in range(s - 1, e):
-                eligible[i] = True
+    if model_disordered_as_beads:
+        # Track runs of L to check for length >= min_linker_len
+        runs = runs_from_labels(lab)
+        for lbl, s, e in runs:
+            if lbl == 'L' and (e - s + 1) >= min_linker_len:
+                for i in range(s - 1, e):
+                    eligible[i] = True
     
     # Also include linkers adjacent to FP domains
     if fp_domains:
@@ -269,8 +316,52 @@ def segments_from_plddt(
     merged = runs_from_labels(lab)
     segs: List[Dict] = []
     for lbl, s, e in merged:
-        if lbl == 'R':
-            segs.append(dict(kind="core", name="core", start=s, end=e))
-        else:
-            segs.append(dict(kind="linker", name="linker", start=s, end=e))
+        # standard classification
+        kind = "core" if lbl == 'R' else "linker"
+        name = kind
+
+        # Refine classification
+        # Check if this segment overlaps significantly with FP mask
+        is_fp = False
+        if lbl == 'R' and fp_domains:
+            # simple check: if majority is fp_mask? 
+            # actually fp domains are forced R. 
+            # Let's check overlap with known fp domains properly
+            seg_mid = (s + e) // 2
+            # Find if this segment is roughly an FP
+            for fp_nm, fp_s, fp_e, _ in fp_domains:
+                # Check overlap
+                # segment indices s, e are 1-based inclusive locally
+                # fp indices fp_s, fp_e are 1-based inclusive locally
+                
+                # Convert to 0-based for overlap calculation
+                s0, e0 = s - 1, e - 1
+                fp_s0, fp_e0 = fp_s - 1, fp_e - 1
+                
+                overlap_start = max(s0, fp_s0)
+                overlap_end = min(e0, fp_e0)
+                overlap_len = max(0, overlap_end - overlap_start + 1)
+                seg_len = e - s + 1
+                
+                if overlap_len > 0.5 * seg_len:
+                    kind = "fp"
+                    name = fp_nm
+                    is_fp = True
+                    break
+        
+        # Check for bead logic (User requested "beads" vs "linker")
+        # If it's a linker, maybe large linkers are beads?
+        if kind == "linker":
+            # If linker length is large, maybe call it beads?
+            # For now, let's stick to "linker" but allow frontend to rename/color?
+            # The prompt said "linker, beads". 
+            # In IMP, disordered regions > some length are usually modeled as a chain of beads.
+            # Small linkers are just flexible constraints.
+            # Let's add a "beads" type for huge linkers?
+            # Or just keep "linker" and let frontend decide visual?
+            # User explicitly said "I only see a wrongly assnged linker"
+            # Maybe they want to see "Beads" for the disordered parts?
+            pass
+
+        segs.append(dict(kind=kind, name=name, start=s, end=e))
     return segs

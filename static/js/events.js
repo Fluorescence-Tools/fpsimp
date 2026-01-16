@@ -1,5 +1,5 @@
 import { DOM } from './config.js';
-import { handleFileUpload, handlePdbUpload, handleFetchStructure, clearSelectedStructures } from './api.js';
+import { handleFileUpload, handlePdbUpload, handleFetchStructure, clearSelectedStructures, recalculateSegmentation } from './api.js';
 import { handleSequenceSelect } from './sequence.js';
 import { handleMembraneSeqInputEvent, clearMembraneRegions, highlightFromTextField } from './membrane.js';
 import { submitJob } from './job.js';
@@ -18,6 +18,20 @@ export function initializeEventListeners() {
             if (fileInput) fileInput.click();
         });
     }
+
+    const clearPdbBtn = document.getElementById(DOM.clearPdbBtn);
+    if (clearPdbBtn) {
+        clearPdbBtn.addEventListener('click', () => {
+            const input = document.getElementById(DOM.pdbIdInput);
+            const fileInput = document.getElementById(DOM.pdbFile);
+            if (input) input.value = '';
+            if (fileInput) fileInput.value = '';
+
+            // Also clear all uploaded/selected structures
+            clearSelectedStructures();
+        });
+    }
+
 
     const pdbFileInput = document.getElementById(DOM.pdbFile);
     if (pdbFileInput) {
@@ -81,8 +95,20 @@ export function initializeEventListeners() {
 
     setupFPSiteListeners();
     setupPipelineParametersToggle();
+    setupSegmentationListeners();
 }
 
+function setupSegmentationListeners() {
+    const params = ['plddtThreshold', 'minRigidLength', 'beadSize', 'modelDisorderedAsBeads'];
+    params.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', () => {
+                recalculateSegmentation();
+            });
+        }
+    });
+}
 function setupPipelineParametersToggle() {
     const toggleButton = document.querySelector(`[data-bs-target="#${DOM.pipelineParametersCollapse}"]`);
     const collapseElement = document.getElementById(DOM.pipelineParametersCollapse);

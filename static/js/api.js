@@ -1,7 +1,8 @@
 import { state } from './state.js';
 import { showSuccess, showError, setLoadingState, formatFileSize, populateSequenceSelector, populateSequenceSelectorFromAllStructures, renderSelectedStructures, showInfo } from './ui.js';
 import { handleSequenceSelect } from './sequence.js';
-import { showStructurePreview, hideStructureViewer } from './viewer.js';
+import { hideStructureViewer } from './viewer.js';
+import { visualizeStructure } from './visualization.js';
 import { DOM } from './config.js';
 import { saveState } from './persistence.js';
 
@@ -132,6 +133,8 @@ async function fetchStructureById(id, inputElement) {
                 sequences: data.sequences || [],
                 derived_fasta: data.derived_fasta || null,
                 uniprot_id: data.uniprot_id || null, // Store UniProt ID if available
+                plddt: data.plddt || {},
+                segments: data.segments || {},
                 selected: true,  // Default to selected
                 type: 'pdb'  // Keep as PDB for display purposes
             });
@@ -140,12 +143,12 @@ async function fetchStructureById(id, inputElement) {
             renderSelectedStructures();
             saveState();
 
-            // Show 3D preview if available
+            // Show 3D preview and plots if available
             if (data.file_url) {
                 try {
-                    await showStructurePreview(data.file_url, data.filename, data.sequences);
+                    await visualizeStructure(newStructure);
                 } catch (viewerError) {
-                    console.warn('3D preview failed:', viewerError);
+                    console.warn('Visualization failed:', viewerError);
                 }
             }
 
@@ -197,6 +200,13 @@ export async function handlePdbUpload(event) {
         const formData = new FormData();
         formData.append('pdb', file);
 
+        // Append current segmentation settings so upload respects them
+        formData.append('plddtThreshold', document.getElementById('plddtThreshold')?.value || 70);
+        formData.append('minRigidLength', document.getElementById('minRigidLength')?.value || 12);
+        formData.append('beadSize', document.getElementById('beadSize')?.value || 10); // used as min_linker_len
+        const beadsChecked = document.getElementById('modelDisorderedAsBeads')?.checked;
+        formData.append('modelDisorderedAsBeads', beadsChecked !== undefined ? beadsChecked : true);
+
         console.log('Uploading PDB file:', file.name, 'Size:', file.size, 'Type:', file.type);
         console.log('FormData keys:', Array.from(formData.keys()));
 
@@ -217,6 +227,8 @@ export async function handlePdbUpload(event) {
                 file_size: data.file_size,
                 sequences: data.sequences || [],
                 derived_fasta: data.derived_fasta || null,
+                plddt: data.plddt || {},
+                segments: data.segments || {},
                 selected: true,  // Default to selected
                 type: 'pdb'  // Keep as PDB for display purposes
             });
@@ -224,12 +236,12 @@ export async function handlePdbUpload(event) {
             // Update the UI
             renderSelectedStructures();
 
-            // Show 3D preview if available
+            // Show 3D preview and plots if available
             if (data.file_url) {
                 try {
-                    await showStructurePreview(data.file_url, file.name, data.sequences);
+                    await visualizeStructure(newStructure);
                 } catch (e) {
-                    console.error('Failed to show structure preview:', e);
+                    console.error('Failed to visualize structure:', e);
                 }
             }
 
@@ -296,6 +308,23 @@ export async function clearSelectedStructures() {
     state.uploadId = null;
     state.currentJobId = null;
     state.lastJobResultsUrl = null;
+    state.membraneRegions = {};
+
+    // Clear visual elements
+    const { renderTopologyTable } = await import('./ui.js');
+    renderTopologyTable('topologyTableContainer', {});
+
+    const { renderPlddtChart } = await import('./plots.js');
+    const plddtCanvas = document.getElementById('plddtChartLanding');
+    if (plddtCanvas) {
+        // Clear the canvas manually first to receive "no data" message if function supports it or just blank
+        // Calling renderPlddtChart with empty objects should clear it
+        renderPlddtChart('plddtChartLanding', {}, {});
+
+        // Also clear the canvas context to remove any lingering pixels if chart fails to self-clear perfectly
+        const ctx = plddtCanvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, plddtCanvas.width, plddtCanvas.height);
+    }
     state.membraneRegions = {};
     state.fpSites = {
         donor: { site1: null, site2: null },
@@ -391,7 +420,7 @@ export async function showStructureByIndex(index) {
     const structure = state.selectStructure(index);
     if (structure && structure.file_url) {
         try {
-            await showStructurePreview(structure.file_url, structure.filename, structure.sequences);
+            await visualizeStructure(structure);
             renderSelectedStructures(); // Update UI to show selection
             return true;
         } catch (error) {
@@ -428,6 +457,56 @@ export function toggleStructureSelected(index) {
         renderSelectedStructures();
         populateSequenceSelectorFromAllStructures();
         saveState();
+    }
+}
+
+// Recalculate segmentation for a structure
+export async function recalculateSegmentation(structureIndex = -1) {
+    // If index -1, use currently selected
+    if (structureIndex === -1) structureIndex = state.selectedStructureIndex;
+
+    // Validate structure
+    if (structureIndex < 0 || structureIndex >= state.structures.length) return;
+    const structure = state.structures[structureIndex];
+    if (!structure.upload_id) return; // Only uploaded/fetched structures with ID can be re-segmented
+
+    // Gather parameters from UI
+    const params = {
+        plddtThreshold: document.getElementById('plddtThreshold')?.value || 70,
+        minRigidLength: document.getElementById('minRigidLength')?.value || 12,
+        beadSize: document.getElementById('beadSize')?.value || 10,
+        modelDisorderedAsBeads: document.getElementById('modelDisorderedAsBeads')?.checked ?? true
+    };
+
+    setLoadingState(true);
+    try {
+        const response = await fetch('/api/resegment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                upload_id: structure.upload_id,
+                filename: structure.original_filename || structure.filename,
+                params: params
+            })
+        });
+
+        const data = await response.json();
+        if (response.ok) {
+            // Update structure segments
+            structure.segments = data.segments || {};
+
+            // Re-visualize if this is the active structure
+            if (structure === state.getSelectedStructure()) {
+                await visualizeStructure(structure);
+            }
+            showInfo('Segmentation updated based on parameters');
+        } else {
+            console.error('Resegmentation failed:', data.error);
+        }
+    } catch (e) {
+        console.error('Error re-segmenting:', e);
+    } finally {
+        setLoadingState(false);
     }
 }
 

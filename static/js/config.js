@@ -2,6 +2,7 @@ export const DOM = {
     fastaFile: 'fastaFile',
     pdbFile: 'pdbFile',
     pdbIdInput: 'pdbOrIdInput',
+    clearPdbBtn: 'clearPdbBtn',
     fetchStructureBtn: 'fetchStructureBtn',
     structuresList: 'structuresList',
     selectedStructuresCount: 'selectedStructuresCount',

@@ -11,6 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <style>
         .status-badge {
             font-size: 1rem;
@@ -194,34 +195,8 @@
         <!-- Intermediate Results Section -->
         {% if status in [JobStatus.RUNNING, JobStatus.COLABFOLD_COMPLETE, JobStatus.SAMPLING_COMPLETE,
         JobStatus.COMPLETED, JobStatus.FAILED] %}
-        <div class="intermediate-results mt-4">
+        <div class="intermediate-results mt-4" id="intermediateResults">
             <h3 class="mb-3"><i class="fas fa-chart-line me-2"></i>Intermediate Results</h3>
-
-            <!-- pLDDT and Sequence -->
-            <div class="card mb-3">
-                <div class="card-header">
-                    <h5 class="mb-0">Sequence and pLDDT Scores</h5>
-                </div>
-                <div class="card-body">
-                    <div style="height: 300px; margin-bottom: 1rem;">
-                        <canvas id="plddtChart"></canvas>
-                    </div>
-                    <div class="mt-3">
-                        <h6>Sequence (colored by pLDDT)</h6>
-                        <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto; background: #fff;">
-                            <div id="sequenceContainer"></div>
-                        </div>
-                        <small class="text-muted d-block mt-2">
-                            <span style="background: #0053D6; color: white; padding: 2px 4px;">≥90</span>
-                            <span style="background: #65CBF3; padding: 2px 4px; margin-left: 8px;">70-90</span>
-                            <span style="background: #FFDB13; padding: 2px 4px; margin-left: 8px;">50-70</span>
-                            <span style="background: #FF7D45; padding: 2px 4px; margin-left: 8px;">&lt;50</span>
-                            <span style="border: 2px solid #00FF00; padding: 2px 4px; margin-left: 16px;">FP
-                                Region</span>
-                        </small>
-                    </div>
-                </div>
-            </div>
 
             <!-- Segmentation -->
             <div class="card mb-3">
@@ -243,6 +218,7 @@
                 </div>
             </div>
 
+
             <!-- PMI Topology File -->
             <div class="card mb-3">
                 <div class="card-header">
@@ -252,6 +228,44 @@
                     <div id="topologyContainer"></div>
                 </div>
             </div>
+
+            <!-- Measurement Analysis -->
+            {% if all_files %}
+            {% set measure_tsv = namespace(path=None) %}
+            {% for file in all_files %}
+            {% if file.name == 'measurements.tsv' or file.name.endswith('.tsv') %}
+            {% set measure_tsv.path = file.path %}
+            {% endif %}
+            {% endfor %}
+
+            {% if measure_tsv.path %}
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Measurement Analysis</h5>
+                    <a href="/api/download/{{ job_id }}/{{ measure_tsv.path|urlencode }}"
+                        class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-download me-1"></i>Download Data (TSV)
+                    </a>
+                </div>
+                <div class="card-body">
+                    <div id="measurementPlot" style="width: 100%; height: 600px;"></div>
+                    <div id="measurementLoading" class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading visualization data...</p>
+                    </div>
+                </div>
+                <script>
+                    document.addEventListener('DOMContentLoaded', () => {
+                        if (window.renderMeasurementAnalysis) {
+                            window.renderMeasurementAnalysis('{{ job_id }}', '{{ measure_tsv.path }}');
+                        }
+                    });
+                </script>
+            </div>
+            {% endif %}
+            {% endif %}
 
         </div>
         {% endif %}
@@ -401,6 +415,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="module" src="{{ url_for('static', filename='js/ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/results.js') }}"></script>
     <script>
         // Initialize on page load

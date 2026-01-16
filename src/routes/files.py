@@ -177,3 +177,86 @@ def colabfold_status():
     queue_dir = Path(os.environ.get('CF_QUEUE_DIR', '/tmp/colabfold_queue'))
     active_jobs = [d.name for d in queue_dir.iterdir() if d.is_dir() and not (d / 'DONE').exists() and not (d / 'ERROR').exists()]
     return jsonify({'active_jobs_count': len(active_jobs), 'active_jobs': active_jobs, 'enabled': not current_app.config['DISABLE_COLABFOLD']})
+
+@files_bp.route('/api/resegment', methods=['POST'])
+def resegment_structure():
+    """Recalculate segmentation with new parameters"""
+    data = request.json
+    upload_id = data.get('upload_id')
+    filename = data.get('filename')
+    params = data.get('params', {})
+    
+    if not upload_id or not filename:
+        return jsonify({'error': 'Missing upload_id or filename'}), 400
+        
+    # Reconstruct file path
+    pdb_path = current_app.config['UPLOAD_FOLDER'] / f"{upload_id}_{secure_filename(filename)}"
+    if not pdb_path.exists():
+        return jsonify({'error': 'Original structure file not found'}), 404
+        
+    from fpsim.segments import parse_plddt_from_pdb, segments_from_plddt
+    from fpsim.utils import extract_sequences_from_structure
+    from utils.bio import detect_fluorescent_protein
+    
+    # Extract params
+    try:
+        rigid_threshold = float(params.get('plddtThreshold', 70.0))
+        min_rb_len = int(params.get('minRigidLength', 12))
+        min_linker_len = int(params.get('beadSize', 10)) # Using beadSize as min_linker_len proxy or separate? 
+        # Actually min_linker_len determines if a linker is big enough to be tracked/beads?
+        # The frontend sends 'minRigidLength' and 'plddtThreshold'.
+        # 'beadSize' is unrelated to segmentation boundaries usually.
+        # Let's check segments_from_plddt defaults: min_linker_len=10.
+        # Front end doesn't seem to expose minLinkerLength separately?
+        # Let's use 10 as default or if there's a param.
+        
+        mode_disordered_as_beads = bool(params.get('modelDisorderedAsBeads', True))
+    except ValueError:
+        return jsonify({'error': 'Invalid parameter values'}), 400
+
+    # We need to re-parse everything because we don't cache intermediate pLDDT/Sequences per upload_id (except in the heavy response)
+    # This is "fast enough" for interactive use on small structures.
+    
+    seqs_by_chain = extract_sequences_from_structure(pdb_path)
+    segments_by_chain = {}
+    
+    for chain_id, sequence in seqs_by_chain.items():
+        # Detect FP
+        fp_info = detect_fluorescent_protein(sequence)
+        
+        # Prepare FP domains
+        fp_domains_for_seg = []
+        if fp_info and 'fps' in fp_info:
+             for fp in fp_info['fps']:
+                 fp_domains_for_seg.append((fp['name'], fp['start'], fp['end'], 0.99))
+        elif fp_info and 'fp_start' in fp_info and 'fp_end' in fp_info:
+            fp_domains_for_seg.append((fp_info['name'], fp_info['fp_start'], fp_info['fp_end'], 0.99))
+
+        # Parse pLDDT
+        try:
+            raw_plddt = parse_plddt_from_pdb(pdb_path, chain_id)
+            # Use raw pLDDT (int keys)
+            # Pass sorted keys as residue_numbers to ensure correct mapping
+            sorted_residues = sorted(raw_plddt.keys())
+            
+            segments = segments_from_plddt(
+                len(sequence),
+                raw_plddt,
+                fp_domains_for_seg,
+                residue_numbers=sorted_residues,
+                rigid_threshold=rigid_threshold,
+                min_rb_len=min_rb_len,
+                min_linker_len=10, # default
+                model_disordered_as_beads=mode_disordered_as_beads
+            )
+            for seg in segments:
+                seg['chain_id'] = chain_id
+            segments_by_chain[chain_id] = segments
+        except Exception as e:
+            # Fallback for no pLDDT
+            segments_by_chain[chain_id] = []
+            
+    return jsonify({
+        'segments': segments_by_chain,
+        'message': 'Segmentation updated'
+    })

@@ -62,6 +62,32 @@ def submit_job():
         job_dir = current_app.config['RESULTS_FOLDER'] / job_id
         job_dir.mkdir(exist_ok=True)
         
+        # Save static plot image if provided
+        if 'plddt_image' in data and data['plddt_image']:
+            try:
+                import base64
+                img_data = data['plddt_image']
+                if 'base64,' in img_data:
+                    img_data = img_data.split('base64,')[1]
+                img_bytes = base64.b64decode(img_data)
+                (job_dir / 'plddt_plot.png').write_bytes(img_bytes)
+                current_app.logger.info(f"Saved pLDDT plot image for job {job_id}")
+            except Exception as e:
+                current_app.logger.error(f"Failed to save pLDDT image: {e}")
+        
+        # Save static structure image if provided
+        if 'structure_image' in data and data['structure_image']:
+            try:
+                import base64
+                img_data = data['structure_image']
+                if 'base64,' in img_data:
+                    img_data = img_data.split('base64,')[1]
+                img_bytes = base64.b64decode(img_data)
+                (job_dir / 'structure.png').write_bytes(img_bytes)
+                current_app.logger.info(f"Saved structure image for job {job_id}")
+            except Exception as e:
+                current_app.logger.error(f"Failed to save structure image: {e}")
+        
         # Create inputs directory within job results
         inputs_dir = job_dir / "inputs"
         inputs_dir.mkdir(exist_ok=True)
@@ -165,7 +191,8 @@ def submit_job():
             'measure_plot': params.get('measure_plot', True),
             'measure_plot_out': params.get('measure_plot_out'),
             'measure_frame_start': params.get('measure_frame_start', 0),
-            'measure_max_frames': params.get('measure_max_frames')
+            'measure_max_frames': params.get('measure_max_frames'),
+            'segments_override': params.get('segments_override')
         }
         
         # If af_pdb was an uploaded file, point to the local copy
@@ -355,6 +382,15 @@ def get_job_intermediate_results(job_id: str):
         return jsonify({'error': 'Job directory not found'}), 404
     
     result = {}
+    
+    # Check for static plddt plot image
+    if (job_dir / 'plddt_plot.png').exists():
+        result['plddt_image_url'] = f"/api/download/{job_id}/plddt_plot.png"
+        
+    # Check for static structure image
+    if (job_dir / 'structure.png').exists():
+        result['structure_image_url'] = f"/api/download/{job_id}/structure.png"
+
     segments_file = job_dir / 'segments.json'
     if segments_file.exists():
         try:
@@ -366,6 +402,11 @@ def get_job_intermediate_results(job_id: str):
                 full_plddt = {}
                 full_segments = []
                 full_fp_domains = []
+                
+                # New structured data
+                plddt_by_chain = {}
+                segments_by_chain = {}
+                
                 af_pdb = segments_data.get('af_pdb')
                 offset = 0
                 
@@ -376,21 +417,45 @@ def get_job_intermediate_results(job_id: str):
                     if not chain_seq and chain_len > 0: chain_seq = 'X' * chain_len
                     full_sequence += chain_seq
                     
+                    # Process pLDDT
+                    chain_plddt_dict = {}
                     if af_pdb and Path(af_pdb).exists():
                         try:
-                            chain_plddt = parse_plddt_from_pdb(Path(af_pdb), label)
-                            for pos, score in chain_plddt.items(): full_plddt[pos + offset] = score
+                            chain_plddt_dict = parse_plddt_from_pdb(Path(af_pdb), label)
+                            for pos, score in chain_plddt_dict.items(): full_plddt[pos + offset] = score
                         except: pass
                     
+                    plddt_by_chain[label] = chain_plddt_dict
+
+                    # Process Segments
+                    chain_segments = []
                     if 'segments' in chain_data:
-                        for seg in chain_data['segments']:
+                        chain_segments = chain_data['segments']
+                        for seg in chain_segments:
                             full_segments.append({**seg, 'start': seg['start'] + offset, 'end': seg['end'] + offset})
+                    
+                    segments_by_chain[label] = chain_segments
+                    
+                    # Process FPs
                     if 'fp_domains' in chain_data:
-                        for fp in chain_data['fp_domains']:
+                        chain_fps = chain_data['fp_domains']
+                        for fp in chain_fps:
                             full_fp_domains.append({**fp, 'start': fp['start'] + offset, 'end': fp['end'] + offset})
+                        
+                        # Add to structured dict (local indices)
+                        if label not in result: result.setdefault('fp_domains_by_chain', {})
+                        result['fp_domains_by_chain'][label] = chain_fps
+                    
                     offset += chain_len
                 
-                result.update({'sequence': full_sequence, 'plddt': full_plddt, 'segments': full_segments, 'fp_domains': full_fp_domains})
+                result.update({
+                    'sequence': full_sequence, 
+                    'plddt': full_plddt, 
+                    'segments': full_segments, 
+                    'fp_domains': full_fp_domains,
+                    'plddt_by_chain': plddt_by_chain,
+                    'segments_by_chain': segments_by_chain
+                })
             else:
                 if 'sequence' in segments_data: result['sequence'] = segments_data['sequence']
                 af_pdb = segments_data.get('af_pdb')
@@ -412,9 +477,57 @@ def get_job_intermediate_results(job_id: str):
         except Exception as e: current_app.logger.error(f"Error reading segments.json: {e}")
     
     top_file = job_dir / 'fusion.top.dat'
+    topology_segments = {}
+    
     if top_file.exists():
-        try: result['topology'] = top_file.read_text().split('\n')
-        except: pass
+        try:
+            lines = top_file.read_text().split('\n')
+            result['topology'] = lines
+            
+            # Parse topology for segments
+            for line in lines:
+                if not line.strip() or line.startswith('|directories|') or line.startswith('|topology_dictionary|') or line.startswith('|molecule_name|'):
+                    continue
+                    
+                parts = line.strip().split('|')
+                if len(parts) < 8: continue
+                
+                # Indexes:
+                # 2: color
+                # 5: pdb_fn (BEADS for linker)
+                # 6: chain
+                # 7: residue_range ("start,end")
+                
+                chain = parts[6]
+                rr = parts[7]
+                color = parts[2]
+                pdb_type = parts[5]
+                
+                if ',' not in rr: continue
+                try:
+                    s, e = map(int, rr.split(','))
+                    
+                    if chain not in topology_segments:
+                        topology_segments[chain] = []
+
+                    # Determine kind
+                    kind = 'linker' if pdb_type == 'BEADS' else 'core'
+                    
+                    topology_segments[chain].append({
+                        'start': s,
+                        'end': e,
+                        'kind': kind, 
+                        'color': color,
+                        'source': 'topology'
+                    })
+                except:
+                    continue
+            
+            if topology_segments:
+                result['topology_segments'] = topology_segments
+                
+        except Exception as e: 
+            current_app.logger.error(f"Error parsing topology: {e}")
         
     return jsonify(result)
 

@@ -269,6 +269,10 @@ def create_distance_kappa_plot(rows, rmf_path: Path, out_tsv: Path | None = None
     m = np.isfinite(D) & np.isfinite(K2)
     D = D[m]; K2 = K2[m]
     
+    # Calculate statistics
+    d_mean, d_std = np.mean(D), np.std(D)
+    k2_mean, k2_std = np.mean(K2), np.std(K2)
+
     # Binning ranges
     xb = np.linspace(0.0, 150.0, 151)
     yb = np.logspace(-2, np.log10(4), 81)
@@ -289,10 +293,14 @@ def create_distance_kappa_plot(rows, rmf_path: Path, out_tsv: Path | None = None
         title="Distance vs $\\kappa^2$",
         xlabel="Distance (Å)",
         ylabel="$\\kappa^2$",
+        stats={
+            "x_mean": d_mean, "x_std": d_std,
+            "y_mean": k2_mean, "y_std": k2_std
+        }
     )
 
 
-def save_2d_marginals_png(img_path, H, x_edges, y_edges, title="", xlabel="", ylabel="", cmap_2d: str = "viridis"):
+def save_2d_marginals_png(img_path, H, x_edges, y_edges, title="", xlabel="", ylabel="", cmap_2d: str = "viridis", stats: Dict[str, float] = None):
     """Render a 2D histogram (x vs y) with top/right marginals and save as PNG.
 
     Assumes y_edges may be log-spaced; uses pcolormesh aligned to edges.
@@ -318,6 +326,15 @@ def save_2d_marginals_png(img_path, H, x_edges, y_edges, title="", xlabel="", yl
     ax_hist.set_ylim(float(y_edges[0]), float(y_edges[-1]))
     ax_hist.set_xlabel(xlabel)
     ax_hist.set_ylabel(ylabel)
+    
+    # Plot mean lines on main plot if stats provided
+    if stats:
+        if "x_mean" in stats:
+            ax_hist.axvline(stats["x_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
+            ax_x.axvline(stats["x_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
+        if "y_mean" in stats:
+            ax_hist.axhline(stats["y_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
+            ax_y.axhline(stats["y_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
 
     # Marginals
     ax_x.hist(
@@ -335,6 +352,23 @@ def save_2d_marginals_png(img_path, H, x_edges, y_edges, title="", xlabel="", yl
         color="#66aa66",
     )
     ax_y.axis("off")
+    
+    # Add statistics text
+    if stats:
+        txt = []
+        if "x_mean" in stats and "x_std" in stats:
+            txt.append(f"Dist: {stats['x_mean']:.1f} ± {stats['x_std']:.1f} Å")
+        if "y_mean" in stats and "y_std" in stats:
+            txt.append(f"$\\kappa^2$: {stats['y_mean']:.2f} ± {stats['y_std']:.2f}")
+            
+        if txt:
+            # Place text on the top right of the top marginal area (ax_x) roughly, or main figure
+            # Actually better to put it in a dedicated text box on the figure
+            fig.text(0.98, 0.98, "\n".join(txt), 
+                     horizontalalignment='right', 
+                     verticalalignment='top',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.9),
+                     fontsize=9)
 
     # Colorbar
     cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])

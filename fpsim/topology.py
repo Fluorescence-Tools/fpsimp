@@ -219,28 +219,88 @@ def write_top_multi(
         # Emit rows; RB 1 for non-FP core, global RBs for FP/linkers
         for seg in segs:
             a, b = int(seg["start"]), int(seg["end"])
-            if seg["kind"] == "linker":
+            
+            # Determine representation (linker=beads, core=rigid)
+            # Default to logic based on kind if representation not present
+            kind = seg.get("kind", "core")
+            rep = seg.get("representation", "bead" if kind == "linker" else "rigid_body")
+            
+            # Helper to get color
+            user_color = seg.get("color")
+            
+            if rep == "bead": # Treated as linker/flexible
                 rr = f"{a},{b}"
                 use_rb = next_rb_global; next_rb_global += 1
+                # Use user color if provided, else linker default
+                seg_color = user_color if user_color else linker_color
                 lines.append(
-                    f"|{mol_name}|{linker_color}|{fasta_fn}|{fasta_id}|BEADS|{label}|{rr}|{pdb_offset}|"
+                    f"|{mol_name}|{seg_color}|{fasta_fn}|{fasta_id}|BEADS|{label}|{rr}|{pdb_offset}|"
                     f"{bead_size}|{em_res_per_gaussian}|{use_rb}|1||"
                 )
-            else:
-                for kind, s, e, fp_nm in _explode_core_segment(a, b):
-                    rr = f"{s},{e}"
-                    if kind == "fp":
-                        use_rb = next_rb_global; next_rb_global += 1
-                        color = fp_color_map.get(fp_nm.lower(), core_color) if fp_nm else core_color
-                        lines.append(
-                            f"|{mol_name}|{color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{label}|{rr}|{pdb_offset}|"
-                            f"1|{em_res_per_gaussian}|{use_rb}|1||"
-                        )
+            else: # Rigid Body
+                # We still might want to explode it by FPs if it's auto-generated,
+                # but if it's an override, we trust the segments.
+                # If kind is 'fp', it might be a rigid body with specific color.
+                
+                # Check if we should explode (legacy logic for auto-segmentation)
+                # If we have an override, we assume segments are final.
+                # But `_explode_core_segment` is local.
+                # Let's assume if "representation" is present, it's an override or explicit set.
+                
+                is_override = "representation" in seg
+                
+                if is_override:
+                    rr = f"{a},{b}"
+                    # Rigid bodies need RBs.
+                    # Standard logic: RB 1 for core protein, distinct RBs for FPs.
+                    # If user set, we might need new RBs?
+                    # The original logic used global RB 1 for all 'core' unless it was FP.
+                    # If we let user set "Rigid Body", they might want it to be part of the main rigid body (RB 1) or a new one.
+                    # Typically, "Core" implies THE rigid body.
+                    
+                    if kind == "fp" or user_color:
+                         # If it's FP or has custom color, give it a unique RB?
+                         # Or just use the color?
+                         # PMI topology file format: |rigid_body| column.
+                         # If 1, it's the main RB. If distinct, it moves separately.
+                         # If user selects "Rigid Body", they likely want it rigid relative to the core?
+                         # Actually usually "Rigid Body" means "Part of the main rigid structure" OR "A rigid body".
+                         # Let's assume RB 1 for "core" kind without custom behavior, and new RB for others?
+                         # For now, let's stick to: if it's "core" kind, use protein_rb. If "fp", distinct.
+                         
+                         use_rb = next_rb_global; next_rb_global += 1
+                         seg_color = user_color if user_color else (fp_color_map.get(seg.get("name","").lower(), core_color))
+                         
+                         if kind == "core" and not user_color:
+                             use_rb = protein_rb
+                             seg_color = core_color
                     else:
-                        # non-FP protein core
-                        lines.append(
-                            f"|{mol_name}|{core_color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{label}|{rr}|{pdb_offset}|"
-                            f"1|{em_res_per_gaussian}|{protein_rb}|1||"
-                        )
+                         use_rb = protein_rb
+                         seg_color = core_color
+                         
+                    lines.append(
+                        f"|{mol_name}|{seg_color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{label}|{rr}|{pdb_offset}|"
+                        f"1|{em_res_per_gaussian}|{use_rb}|1||"
+                    )
+                else:
+                    # Legacy fallback
+                    if kind == "linker": # Should have been caught by rep
+                         pass 
+                    else:
+                        for sub_kind, s, e, fp_nm in _explode_core_segment(a, b):
+                            rr = f"{s},{e}"
+                            if sub_kind == "fp":
+                                use_rb = next_rb_global; next_rb_global += 1
+                                color = fp_color_map.get(fp_nm.lower(), core_color) if fp_nm else core_color
+                                lines.append(
+                                    f"|{mol_name}|{color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{label}|{rr}|{pdb_offset}|"
+                                    f"1|{em_res_per_gaussian}|{use_rb}|1||"
+                                )
+                            else:
+                                # non-FP protein core
+                                lines.append(
+                                    f"|{mol_name}|{core_color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{label}|{rr}|{pdb_offset}|"
+                                    f"1|{em_res_per_gaussian}|{protein_rb}|1||"
+                                )
 
     top_path.write_text("\n".join(lines) + "\n")

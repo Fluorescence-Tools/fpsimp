@@ -77,8 +77,19 @@ def run_colabfold_container(
     
     return structures[0]
 
-def _create_structure_response(upload_id: str, filename: str, pdb_path: Path, seqs_by_chain: dict):
+def _create_structure_response(
+    upload_id: str, 
+    filename: str, 
+    pdb_path: Path, 
+    seqs_by_chain: dict,
+    rigid_threshold: float = 70.0,
+    min_rb_len: int = 12,
+    min_linker_len: int = 10,
+    model_disordered_as_beads: bool = False
+):
     """Create standardized response for structure download"""
+    from fpsim.segments import parse_plddt_from_pdb, segments_from_plddt
+    
     # Create merged FASTA under uploads with same upload_id
     merged_fasta_path = config.UPLOAD_FOLDER / f"{upload_id}_{Path(filename).stem}.fasta"
     
@@ -93,8 +104,55 @@ def _create_structure_response(upload_id: str, filename: str, pdb_path: Path, se
         f.write(f">{Path(filename).stem}\n{merged_sequence}\n")
     
     sequences = []
+    plddt_by_chain = {}
+    segments_by_chain = {}
+
     for chain_id, sequence in seqs_by_chain.items():
+        # Detect FP
         fp_info = detect_fluorescent_protein(sequence)
+        
+        # Parse pLDDT
+        try:
+            raw_plddt = parse_plddt_from_pdb(pdb_path, chain_id)
+            # Keep native integer keys for calculation
+            plddt = raw_plddt
+            
+            # For JSON output only
+            plddt_for_json = {str(k): float(v) for k, v in raw_plddt.items()}
+            plddt_by_chain[chain_id] = plddt_for_json
+        except Exception as e:
+            print(f"Warning: Could not parse pLDDT for chain {chain_id}: {e}")
+            plddt = {}
+
+        # Generate Segments
+        # segments_from_plddt expects list of (name, start, end, identity)
+        fp_domains_for_seg = []
+        if fp_info and 'fps' in fp_info:
+             # If multiple FPs were detected (e.g. via motif search/alignment)
+             for fp in fp_info['fps']:
+                 fp_domains_for_seg.append((fp['name'], fp['start'], fp['end'], 0.99)) # Dummy identity if not available
+        elif fp_info and 'fp_start' in fp_info and 'fp_end' in fp_info:
+            fp_domains_for_seg.append((fp_info['name'], fp_info['fp_start'], fp_info['fp_end'], 0.99))
+
+        if plddt:
+            sorted_residues = sorted(plddt.keys())
+            segments = segments_from_plddt(
+                len(sequence),
+                plddt,
+                fp_domains_for_seg,
+                residue_numbers=sorted_residues,
+                rigid_threshold=rigid_threshold,
+                min_rb_len=min_rb_len,
+                min_linker_len=min_linker_len,
+                model_disordered_as_beads=model_disordered_as_beads
+            )
+            # Add chain_id to segments for frontend convenience
+            for seg in segments:
+                seg['chain_id'] = chain_id
+            segments_by_chain[chain_id] = segments
+        else:
+             segments_by_chain[chain_id] = []
+
         seq_data = {
             'id': chain_id,
             'description': f"Chain {chain_id}",
@@ -125,6 +183,14 @@ def _create_structure_response(upload_id: str, filename: str, pdb_path: Path, se
                     }]
         sequences.append(seq_data)
 
+    # Debug logging
+    with open("/app/fpsim_debug.log", "a") as f:
+        f.write(f"DEBUG: Response prep - plddt_by_chain keys: {list(plddt_by_chain.keys())}\n")
+        if plddt_by_chain:
+             first_chain = list(plddt_by_chain.keys())[0]
+             f.write(f"DEBUG: First chain ({first_chain}) sample: {str(list(plddt_by_chain[first_chain].items())[:3])}\n")
+             f.write(f"DEBUG: Segments keys: {list(segments_by_chain.keys())}\n")
+
     return jsonify({
         'upload_id': upload_id,
         'filename': filename,
@@ -132,6 +198,8 @@ def _create_structure_response(upload_id: str, filename: str, pdb_path: Path, se
         'file_url': f"/api/download_structure/{upload_id}_{filename}",
         'file_size': pdb_path.stat().st_size,
         'sequences': sequences,
+        'plddt': plddt_by_chain,
+        'segments': segments_by_chain,
         'derived_fasta': str(merged_fasta_path),
         'merged_header': Path(filename).stem,
         'note': f"Structure {filename} downloaded. Derived FASTA created by merging chains with ':'"

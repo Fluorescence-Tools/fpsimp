@@ -81,7 +81,8 @@ class PipelineConfig:
         measure_plot_out: Optional[Path] = None,
         measure_frame_start: int = 0,
         measure_max_frames: Optional[int] = None,
-        status_callback = None
+        status_callback = None,
+        segments_override: Optional[Dict[str, List[Dict]]] = None
     ):
         self.fasta = fasta
         self.out_dir = out_dir
@@ -132,6 +133,7 @@ class PipelineConfig:
         self.measure_frame_start = measure_frame_start
         self.measure_max_frames = measure_max_frames
         self.status_callback = status_callback or (lambda x: None)
+        self.segments_override = segments_override
 
 
 def ensure_af_pdb(config: PipelineConfig) -> Path:
@@ -224,16 +226,72 @@ def process_multimer_workflow(config: PipelineConfig, af_pdb: Path, seq_id_raw: 
         return top_path
     
     # Process multimer chains
-    labels, segs_by_chain, fp_domains_by_chain, chains_meta = process_multimer_chains(
-        seq_raw, seq_id_raw, af_pdb, config.fp_library, 
-        config.plddt_rigid, config.min_rb_len, config.min_linker_len, config.vprint, config.verbose
-    )
+    if config.segments_override:
+        config.vprint("[override] Using provided segmentation override.")
+        segs_by_chain = config.segments_override
+        # Logic to reconstitute labels/fp_domains, and crucially SEQUENCE info
+        # We need `labels` for the next steps
+        labels = sorted(list(segs_by_chain.keys()))
+        sequences = seq_raw.split(':')
+        
+        chains_meta = {}
+        fp_domains_by_chain = {}
+        
+        for idx, label in enumerate(labels):
+            # Assumes generic chain labeling A, B, C matching sequence order
+            seq = sequences[idx] if idx < len(sequences) else ""
+            segments = segs_by_chain[label]
+            
+            # Reconstruct fp_domains from segments if kind == 'fp'
+            fp_domains_dicts = []
+            fp_domains_tuples = []
+            
+            for s in segments:
+                if s.get('kind') == 'fp':
+                    name = s.get('name', 'FP')
+                    start = s['start']
+                    end = s['end']
+                    identity = s.get('identity', 1.0)
+                    color = s.get('color', 'green')
+                    
+                    fp_domains_dicts.append({
+                        "name": name,
+                        "start": start,
+                        "end": end,
+                        "identity": identity,
+                        "color": color
+                    })
+                    fp_domains_tuples.append((name, start, end, identity))
+            
+            fp_domains_by_chain[label] = fp_domains_tuples
+            
+            chains_meta[label] = {
+                "sequence": seq,
+                "sequence_len": len(seq),
+                "segments": segments,
+                "fp_domains": fp_domains_dicts
+            }
+    else:
+        labels, segs_by_chain, fp_domains_by_chain, chains_meta = process_multimer_chains(
+            seq_raw, seq_id_raw, af_pdb, config.fp_library, 
+            config.plddt_rigid, config.min_rb_len, config.min_linker_len, config.vprint, config.verbose
+        )
     
     # Create metadata
-    meta = create_multimer_metadata(
-        seq_id_raw, af_pdb, config.plddt_rigid, config.min_rb_len, 
-        config.bead_res_per_bead, labels, chains_meta
-    )
+    if config.segments_override:
+        meta = {
+           "sequence_id": seq_id_raw,
+           "af_pdb": str(af_pdb),
+           "plddt_rigid": config.plddt_rigid,
+           "chains": chains_meta,
+           "chain_labels": labels,
+           "override": True
+        }
+    else:
+        meta = create_multimer_metadata(
+            seq_id_raw, af_pdb, config.plddt_rigid, config.min_rb_len, 
+            config.bead_res_per_bead, labels, chains_meta
+        )
     (config.out_dir / "segments.json").write_text(json.dumps(meta, indent=2))
     
     # Sanitize FASTA and write multi-topology
@@ -448,8 +506,10 @@ def process_single_chain_workflow(config: PipelineConfig, af_pdb: Path, seq_id_r
     plddt = parse_plddt_from_pdb(af_pdb, config.chain)
     config.vprint(f"[run {config.chain}] pLDDT residues parsed: {len(plddt)}")
     
+    sorted_residues = sorted(plddt.keys())
     segs = segments_from_plddt(
-        len(seq_for_seg), plddt, domains, 
+        len(seq_for_seg), plddt, domains,
+        residue_numbers=sorted_residues, 
         rigid_threshold=config.plddt_rigid, min_rb_len=config.min_rb_len,
         min_linker_len=config.min_linker_len
     )

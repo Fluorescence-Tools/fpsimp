@@ -125,10 +125,22 @@ export async function submitJob(event) {
     const emailInput = document.getElementById('emailInput');
     const email = emailInput ? emailInput.value.trim() : '';
 
+    // Capture pLDDT Plot Image from Landing Page
+    const canvas = document.getElementById('plddtChart');
+    const plddtImage = canvas ? canvas.toDataURL('image/png') : null;
+    if (plddtImage) console.log('Captured pLDDT plot image');
+
+    // Capture 3D Structure Image
+    const viewerCanvas = document.querySelector('#structure-viewer canvas') || document.querySelector('#molstar-wrapper canvas');
+    const structureImage = viewerCanvas ? viewerCanvas.toDataURL('image/png') : null;
+    if (structureImage) console.log('Captured structure image');
+
     const jobData = {
         upload_id: uploadId,
         parameters: parameters,
-        email: email
+        email: email,
+        plddt_image: plddtImage,     // Send base64 image
+        structure_image: structureImage // Send base64 image
     };
     console.log('Prepared job data:', jobData);
 
@@ -305,6 +317,31 @@ function collectParameters(sequenceId) {
     // Always respect user's ColabFold checkbox
     const runColab = !!val('runColabfold', true);
 
+    // Collect segments override from selected structures
+    const segmentsOverride = {};
+    if (selectedStructures.length > 0) {
+        selectedStructures.forEach(structure => {
+            // Check if structure has modified segments
+            if (structure.segments) {
+                // Determine chain ID (mocking backend logic or using available info)
+                // For simplified single-chain/multimer, we might need to map structure to chain ID.
+                // In multimer mode, structure.filename or sequence ID is often used key.
+                // Let's assume the keys in structure.segments match what the backend expects (A, B, etc.)
+                // or we pass the whole object and let backend figure it out?
+                // The backend `process_multimer_chains` generates keys like 'A', 'B'.
+                // The frontend `state.structures` should ideally track which chain label it corresponds to.
+                // Currently `renderTopologyTable` iterates keys of `state.segments` (if it existed globally) 
+                // or `structure.segments`.
+
+                // Inspecting how `renderTopologyTable` is called in `app.js` or `visualization.js` would confirm.
+                // But assuming `structure.segments` keys are chain IDs.
+                Object.keys(structure.segments).forEach(chainId => {
+                    segmentsOverride[chainId] = structure.segments[chainId];
+                });
+            }
+        });
+    }
+
     return {
         sequence_id: sequenceId,
         run_colabfold: runColab,
@@ -345,6 +382,7 @@ function collectParameters(sequenceId) {
         })() : [],
         // Use the first PDB structure from selected structures
         af_pdb: pdbProvided ? selectedStructures.find(s => s.type === 'pdb' && s.file_path)?.file_path : null,
+        segments_override: Object.keys(segmentsOverride).length > 0 ? segmentsOverride : null
     };
 }
 
@@ -794,3 +832,4 @@ function refreshJobStatus() {
         pollJobStatus(state.currentJobId);
     }
 }
+

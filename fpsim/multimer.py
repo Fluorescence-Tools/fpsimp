@@ -53,8 +53,10 @@ def process_multimer_chains(
         plddt = parse_plddt_from_pdb(af_pdb, label)
         vprint(f"[{label}] pLDDT residues parsed: {len(plddt)}")
         
+        sorted_residues = sorted(plddt.keys())
         segs = segments_from_plddt(
             len(seq_for_seg), plddt, domains, 
+            residue_numbers=sorted_residues,
             rigid_threshold=plddt_rigid, min_rb_len=min_rb_len, min_linker_len=min_linker_len
         )
         vprint(f"[{label}] segments: {len(segs)} -> {[(seg['kind'], seg['start'], seg['end']) for seg in segs]}")

@@ -1,4 +1,4 @@
-import { showError, showInfo } from './ui.js';
+import { showError, showInfo, PMI_COLORS } from './ui.js';
 
 // Global NGL viewer state
 let nglLoaded = false;
@@ -120,9 +120,11 @@ let currentComponent = null;
  * @param {string} fileUrl - URL to the structure file
  * @param {string} filename - Name of the file for display
  * @param {Array} sequences - Array of sequence objects with FP data (optional)
+ * @param {Array} sequences - Array of sequence objects with FP data (optional)
+ * @param {Object} segments - Segmentation data (optional)
  * @returns {Promise<boolean>} True if preview was shown, false otherwise
  */
-export async function showStructurePreview(fileUrl, filename = 'structure', sequences = null) {
+export async function showStructurePreview(fileUrl, filename = 'structure', sequences = null, segments = null) {
     console.log('Attempting to show structure preview for:', filename);
     if (sequences) {
         console.log('FP data provided for coloring:', sequences.map(s => ({ chain: s.chain, fps: s.fps })));
@@ -139,7 +141,7 @@ export async function showStructurePreview(fileUrl, filename = 'structure', sequ
     // Check if we can just update representations without reloading
     if (currentViewer && currentFileUrl === fileUrl && currentComponent) {
         console.log('File already loaded, updating representations only');
-        updateRepresentations(currentComponent, sequences);
+        updateRepresentations(currentComponent, sequences, segments);
         return true;
     }
 
@@ -213,7 +215,7 @@ export async function showStructurePreview(fileUrl, filename = 'structure', sequ
         loadingDiv.remove();
 
         // Apply coloring
-        updateRepresentations(component, sequences);
+        updateRepresentations(component, sequences, segments);
 
         // Auto-view the structure
         currentViewer.autoView();
@@ -250,49 +252,104 @@ export async function showStructurePreview(fileUrl, filename = 'structure', sequ
 /**
  * Update representations for the given component
  */
-function updateRepresentations(component, sequences) {
-    console.log('updateRepresentations called with sequences:', sequences ? sequences.length : 0);
+/**
+ * Update representations for the given component
+ * @param {Object} component - NGL component
+ * @param {Array} sequences - Array of sequence objects with FP data
+ * @param {Object} segmentsByChain - Dict {chainId: [segmentObjects]} (optional)
+ */
+export function updateRepresentations(component, sequences, segmentsByChain = null) {
+    console.log('updateRepresentations called');
 
     // Remove all existing representations
     component.removeAllRepresentations();
 
-    // Check if we have FP data
-    const hasFpData = sequences && sequences.length > 0 && sequences.some(s => s.fps && s.fps.length > 0);
+    // 1. Base Coloring Strategy
+    if (segmentsByChain && Object.keys(segmentsByChain).length > 0) {
+        console.log('Applying Segment-based coloring');
 
-    if (hasFpData) {
-        console.log('Applying FP-based coloring via updateRepresentations');
+        // Default colors
+        // const colorRigid = '#BDBDBD'; // Gray
+        // const colorLinker = '#FFA500'; // Orange
 
-        // First add a base gray representation for non-FP regions
+        Object.keys(segmentsByChain).forEach(chainId => {
+            const segments = segmentsByChain[chainId];
+            segments.forEach(seg => {
+                // seg.start/end are 0-based inclusive
+                // NGL selection uses 1-based, and range is inclusive? 
+                // NGL selection string: ":A and 1-10" (residues 1 to 10)
+
+                const chainSele = chainId ? `:${chainId} and` : '';
+                const selection = `${chainSele} ${seg.start + 1}-${seg.end + 1}`;
+
+                // Determine color
+                let segColor;
+                if (seg.color) {
+                    // Use assigned color (might be hex or name property from some other logic, but usually hex from table)
+                    // Check if it's a PMI name
+                    const pmiHex = PMI_COLORS[seg.color];
+                    if (pmiHex) {
+                        segColor = pmiHex;
+                    } else {
+                        // Assume hex or valid CSS color
+                        segColor = seg.color;
+                    }
+                } else {
+                    // Default logic based on kind
+                    if (seg.kind === 'fp') {
+                        segColor = PMI_COLORS['Green'];
+                    } else if (seg.kind === 'linker') {
+                        segColor = PMI_COLORS['Orpiment'];
+                    } else {
+                        segColor = PMI_COLORS['Gray'];
+                    }
+                }
+
+                component.addRepresentation('cartoon', {
+                    sele: selection,
+                    color: segColor,
+                    quality: 'medium' // 'high' is better for publication but slower
+                });
+            });
+        });
+
+    } else {
+        // Fallback or default coloring
+        console.log('No segments provided, using base coloring');
         component.addRepresentation('cartoon', {
             color: '#BDBDBD',
             quality: 'medium'
         });
+    }
 
-        // Then add colored representations for each FP region
+    // 2. Overlay FP Colors (High Priority) - ONLY if no segments provided or forced
+    // If segments are provided, they are the source of truth for coloring (user can edit them in table).
+    // The table handles coloring logic, so we should rely on segments.
+    // We only use this overlay if we are in "raw structure" mode without segmentation.
+    const hasSegments = segmentsByChain && Object.keys(segmentsByChain).length > 0;
+    const hasFpData = sequences && sequences.length > 0 && sequences.some(s => s.fps && s.fps.length > 0);
+
+    if (hasFpData && !hasSegments) {
+        console.log('Applying FP-based coloring overlay (no segments present)');
         sequences.forEach(seq => {
             if (seq.fps && seq.fps.length > 0) {
-                console.log(`Processing ${seq.fps.length} FPs/regions for sequence ${seq.id}`);
                 seq.fps.forEach(fp => {
-                    // Build selection string for this FP region
-                    // Handle missing chain ID
                     const chainSele = seq.chain ? `:${seq.chain} and` : '';
                     const selection = `${chainSele} ${fp.start + 1}-${fp.end + 1}`;
 
-                    // Map FP color to hex
                     let hexColor;
                     if (fp.color === 'green') {
                         hexColor = '#66BB6A';
                     } else if (fp.color === 'magenta') {
                         hexColor = '#EC407A';
+                    } else if (fp.color === 'cyan') {
+                        hexColor = '#00FFFF';
                     } else if (fp.color === 'yellow') {
                         hexColor = '#FFEE58';
                     } else {
-                        hexColor = '#BDBDBD';
+                        hexColor = '#00FF00'; // Default green
                     }
 
-                    console.log(`Adding FP region: ${fp.name} selection "${selection}" color ${hexColor}`);
-
-                    // Add representation for this FP region
                     component.addRepresentation('cartoon', {
                         sele: selection,
                         color: hexColor,
@@ -301,18 +358,13 @@ function updateRepresentations(component, sequences) {
                 });
             }
         });
-    } else {
-        // No FP data, use default chainname coloring
-        console.log('No FP data, applying default chainname coloring');
-        component.addRepresentation('cartoon', {
-            color: 'chainname',
-            quality: 'medium'
-        });
     }
 
     // Ensure the viewer updates
     if (currentViewer && currentViewer.viewer) {
-        currentViewer.viewer.requestRender();
+        try {
+            currentViewer.viewer.requestRender();
+        } catch (e) { console.warn("Failed to request render", e); }
     }
 }
 

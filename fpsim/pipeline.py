@@ -665,7 +665,9 @@ def run_measurement_step(config: PipelineConfig, out_dir: Path) -> Optional[Dict
     plot_path = None
     if config.measure_plot and len(parsed_sites) == 4:
         plot_path = config.measure_plot_out or (tsv_path.with_suffix(".png"))
-        create_distance_kappa_plot(rows, rmf_files[0], tsv_path, plot_path)
+        # Use simple basename of af_pdb (e.g. "structure.pdb") as title
+        plot_title = config.af_pdb.name if config.af_pdb else "Unknown Structure"
+        create_distance_kappa_plot(rows, rmf_files[0], tsv_path, plot_path, plot_title=plot_title)
         config.vprint(f"[measure] Plot saved to: {plot_path}")
     
     return {

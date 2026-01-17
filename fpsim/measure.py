@@ -153,7 +153,8 @@ def compute_kappa(coords: list[np.ndarray]) -> tuple[float, float, float]:
 
 def compute_statistics(rows):
     """Compute summary statistics from measurement rows."""
-    r_arr = np.array([r for _, r, _, _ in rows], dtype=np.float64)
+    # Use index access to handle variable row length (2, 4, or 5 columns)
+    r_arr = np.array([row[1] for row in rows], dtype=np.float64)
     out = {
         "frames": len(rows),
         "distance_mean": float(np.nanmean(r_arr)),
@@ -161,14 +162,23 @@ def compute_statistics(rows):
     }
     
     # Check if we have kappa data (4 sites)
-    if len(rows) > 0 and not np.isnan(rows[0][2]):
-        k_arr = np.array([k for _, _, k, _ in rows], dtype=np.float64)
-        k2_arr = np.array([k2 for _, _, _, k2 in rows], dtype=np.float64)
+    if len(rows) > 0 and len(rows[0]) >= 4 and not np.isnan(rows[0][2]):
+        k_arr = np.array([row[2] for row in rows], dtype=np.float64)
+        k2_arr = np.array([row[3] for row in rows], dtype=np.float64)
         out.update({
             "kappa_mean": float(np.nanmean(k_arr)),
             "kappa_std": float(np.nanstd(k_arr)),
+            "kappa_std": float(np.nanstd(k_arr)),
             "kappa2_mean": float(np.nanmean(k2_arr)),
             "kappa2_std": float(np.nanstd(k2_arr)),
+        })
+        
+    # Check if we have Rapp (5 items)
+    if len(rows) > 0 and len(rows[0]) >= 5:
+        rapp_arr = np.array([row[4] for row in rows], dtype=np.float64)
+        out.update({
+             "rapp_mean": float(np.nanmean(rapp_arr)),
+             "rapp_std": float(np.nanstd(rapp_arr)),
         })
     
     return out
@@ -204,7 +214,14 @@ def measure_frames(rmf, parts, frame_start: int = 0, max_frames: int | None = No
             else:
                 raise ValueError(f"Expected 2 or 4 points, got {len(coords)}")
                 
-            rows.append((global_frame_offset + fi, r, k, k2))
+                
+            # Calculate Rapp per frame: Rapp = R * ((2/3) / k2)^(1/6)
+            # If k2 is invalid or <=0 (should handle carefully), rapp is nan
+            rapp = float('nan')
+            if not np.isnan(k2) and k2 > 0:
+                rapp = r * np.power((2.0/3.0) / k2, 1.0/6.0)
+
+            rows.append((global_frame_offset + fi, r, k, k2, rapp))
         except Exception as e:
             if verbose:
                 logger.warning(f"Error measuring frame {fi}: {e}")
@@ -252,31 +269,123 @@ def write_measurements_tsv(rows, out_tsv: Path):
         has_kappa = len(rows) > 0 and not np.isnan(rows[0][2])
         
         if not has_kappa:
-            fh.write("frame\tdistance_Ang\n")
-            for fi, r, _, _ in rows:
+            fh.write("frame\tRDA\n")
+            for row in rows:
+                # row is (fi, r) or (fi, r, nan, nan, nan) depending on legacy
+                fi, r = row[0], row[1]
                 fh.write(f"{fi}\t{r:.3f}\n")
         else:
-            fh.write("frame\tdistance_Ang\tkappa\tkappa2\n")
-            for fi, r, k, k2 in rows:
-                fh.write(f"{fi}\t{r:.3f}\t{'' if np.isnan(k) else f'{k:.6f}'}\t{'' if np.isnan(k2) else f'{k2:.6f}'}\n")
+            fh.write("frame\tRDA\tkappa\tkappa2\tRapp\n")
+            for fi, r, k, k2, rapp in rows:
+                k_str = "" if np.isnan(k) else f"{k:.6f}"
+                k2_str = "" if np.isnan(k2) else f"{k2:.6f}"
+                rapp_str = "" if np.isnan(rapp) else f"{rapp:.3f}"
+                
+                fh.write(f"{fi}\t{r:.3f}\t{k_str}\t{k2_str}\t{rapp_str}\n")
 
 
-def create_distance_kappa_plot(rows, rmf_path: Path, out_tsv: Path | None = None, plot_out: Path | None = None):
-    """Create 2D histogram plot of distance vs kappa^2."""
+def create_distance_kappa_plot(rows, rmf_path: Path, out_tsv: Path | None = None, plot_out: Path | None = None, plot_title: str | None = None):
+    """Create dual-panel 2D histogram plot: Rapp vs k2 and Distance vs k2."""
     # Distance (Å) and kappa^2 arrays
-    D = np.array([r for _, r, _, _ in rows], dtype=np.float64)
-    K2 = np.array([k2 for _, _, _, k2 in rows], dtype=np.float64)
+    # Distance (Å) and kappa^2 arrays
+    D = np.array([r for _, r, _, _, _ in rows], dtype=np.float64)
+    K2 = np.array([k2 for _, _, _, k2, _ in rows], dtype=np.float64)
+    R_app = np.array([rapp for _, _, _, _, rapp in rows], dtype=np.float64)
+    
     m = np.isfinite(D) & np.isfinite(K2)
     D = D[m]; K2 = K2[m]
+    # Filter Rapp using same mask if needed, but it might have its own NaNs
+    # Actually simpler: Rapp comes pre-calculated.
+    # Note: R_app might be NaN even if D and K2 are finite (e.g. K2=0, though usually filtered)
+    
+    # We use the valid indices for D/K2 to filter Rapp for the plots?
+    # Or just mask all.
+    # Let's realign.
+    
+    # Re-extract clean arrays for plotting using boolean masking on ALL
+    # Actually, R_app calculation depends on K2 > 0.
+    
+    # Let's blindly trust the pre-calculated Rapp for the Rapp-histogram.
+    # But for D vs K2 histogram, we use valid D and K2.
+    
+    # Update masking
+    mask_dist = np.isfinite(D) & np.isfinite(K2)
+    D = D[mask_dist]
+    K2 = K2[mask_dist] # For Dist plot
+    
+    # For Rapp plot
+    # We want valid Rapp and valid K2
+    mask_rapp = np.isfinite(R_app) & np.isfinite(K2) # Wait, K2 is already filtered? No, K2 is raw array here.
+    # Let's act on original arrays
+    K2_orig = np.array([k2 for _, _, _, k2, _ in rows], dtype=np.float64)
+    
+    mask_rapp_valid = np.isfinite(R_app) & np.isfinite(K2_orig)
+    R_app_clean = R_app[mask_rapp_valid]
+    K2_clean_for_rapp = K2_orig[mask_rapp_valid]
+    
+    # Filter valid R_app for stats and plotting
+    # We need strictly valid R_app for its own histogram
+    valid_rapp_mask = np.isfinite(R_app)
+    R_app_clean = R_app[valid_rapp_mask]
+    K2_clean_for_rapp = K2[valid_rapp_mask]
     
     # Calculate statistics
     d_mean, d_std = np.mean(D), np.std(D)
     k2_mean, k2_std = np.mean(K2), np.std(K2)
+    
+    if len(R_app_clean) > 0:
+        r_app_mean, r_app_std = np.mean(R_app_clean), np.std(R_app_clean)
+    else:
+        r_app_mean, r_app_std = np.nan, np.nan
 
     # Binning ranges
+    # Distance and Rapp share the same X binning logic (0-150 A)
     xb = np.linspace(0.0, 150.0, 151)
-    yb = np.logspace(-2, np.log10(4), 81)
-    H, xe, ye = np.histogram2d(D, K2, bins=[xb, yb])
+    # Log bins for K2, extended to 0.001
+    yb = np.logspace(-3, np.log10(4), 81)
+    
+    # Histogram 1: Distance vs K2
+    H_dist, xe_dist, ye = np.histogram2d(D, K2, bins=[xb, yb])
+    
+    # Histogram 2: Rapp vs K2 (using clean data)
+    H_rapp, xe_rapp, _ = np.histogram2d(R_app_clean, K2_clean_for_rapp, bins=[xb, yb])
+    
+    # Calculate Modes (Stabilized)
+    def get_mode(hist, edges, is_log=False):
+        if hist.sum() == 0: return np.nan
+        # 1. Find the peak bin
+        idx = np.argmax(hist)
+        
+        # 2. Define a small window around peak (e.g. +/- 1 bin) to centroid
+        # This stabilizes the mode against single-bin noise
+        start = max(0, idx - 1)
+        end = min(len(hist), idx + 2) # Slice is exclusive at end
+        
+        subset_counts = hist[start:end]
+        
+        if is_log:
+            # For log bins, working in log-space (geometric mean) matches the linear centroid logic
+            # Bin centers in log space: sqrt(edge[i]*edge[i+1])
+            # Actually simpler: log_centers = (log(e[i]) + log(e[i+1])) / 2
+            # Log edges
+            le = np.log(edges)
+            subset_log_centers = 0.5 * (le[start:end] + le[start+1:end+1])
+            
+            # Weighted mean of log centers
+            total_w = subset_counts.sum()
+            if total_w == 0: return np.nan
+            w_mean_log = np.sum(subset_counts * subset_log_centers) / total_w
+            return np.exp(w_mean_log)
+        else:
+            # Linear bin centers
+            frame_centers = 0.5 * (edges[start:end] + edges[start+1:end+1])
+            total_w = subset_counts.sum()
+            if total_w == 0: return np.nan
+            return np.sum(subset_counts * frame_centers) / total_w
+            
+    x_mode = get_mode(H_dist.sum(axis=1), xb)
+    y_mode = get_mode(H_dist.sum(axis=0), yb, is_log=True)
+    r_app_mode = get_mode(H_rapp.sum(axis=1), xb)
 
     # Determine output path
     if plot_out is None:
@@ -285,96 +394,237 @@ def create_distance_kappa_plot(rows, rmf_path: Path, out_tsv: Path | None = None
         else:
             plot_out = rmf_path.with_suffix(".measure.png")
 
-    save_2d_marginals_png(
+    # Use explicit title if provided, else fallback to filename
+    final_title = plot_title if plot_title is not None else rmf_path.name
+
+    save_dual_2d_marginals_png(
         img_path=plot_out,
-        H=H,
-        x_edges=xe,
-        y_edges=ye,
-        title="Distance vs $\\kappa^2$",
-        xlabel="Distance (Å)",
-        ylabel="$\\kappa^2$",
+        H_dist=H_dist,
+        H_rapp=H_rapp,
+        x_edges=xb,
+        y_edges=yb,
+        title=final_title,
         stats={
             "x_mean": d_mean, "x_std": d_std,
-            "y_mean": k2_mean, "y_std": k2_std
+            "y_mean": k2_mean, "y_std": k2_std,
+            "r_app_mean": r_app_mean, "r_app_std": r_app_std,
+            "x_mode": x_mode, "y_mode": y_mode, "r_app_mode": r_app_mode
         }
     )
 
 
-def save_2d_marginals_png(img_path, H, x_edges, y_edges, title="", xlabel="", ylabel="", cmap_2d: str = "viridis", stats: Dict[str, float] = None):
-    """Render a 2D histogram (x vs y) with top/right marginals and save as PNG.
-
-    Assumes y_edges may be log-spaced; uses pcolormesh aligned to edges.
-    """
+def save_dual_2d_marginals_png(img_path, H_dist, H_rapp, x_edges, y_edges, title="", cmap_2d: str = "viridis", stats: Dict[str, float] = None):
+    """Render a dual-panel 2D histogram (Rapp vs K2 | Dist vs K2) with marginals."""
     import numpy as np
     import matplotlib.pyplot as plt
-    from matplotlib.gridspec import GridSpec
+    import matplotlib.cm as cm
+    import matplotlib.ticker as ticker
 
-    H = np.asarray(H, dtype=float)
+    # Data prep
+    H_dist = np.asarray(H_dist, dtype=float)
+    H_rapp = np.asarray(H_rapp, dtype=float)
     x_edges = np.asarray(x_edges, dtype=float)
     y_edges = np.asarray(y_edges, dtype=float)
-
-    fig = plt.figure(figsize=(8, 6))
-    gs = GridSpec(2, 2, width_ratios=[4, 1.2], height_ratios=[1.2, 4], wspace=0.05, hspace=0.05)
-    ax_hist = fig.add_subplot(gs[1, 0])
-    ax_x = fig.add_subplot(gs[0, 0], sharex=ax_hist)
-    ax_y = fig.add_subplot(gs[1, 1], sharey=ax_hist)
-
-    # 2D heatmap aligned to edges
-    im = ax_hist.pcolormesh(x_edges, y_edges, H.T, cmap=cmap_2d, shading="auto")
-    ax_hist.set_yscale("log")
-    ax_hist.set_xlim(float(x_edges[0]), float(x_edges[-1]))
-    ax_hist.set_ylim(float(y_edges[0]), float(y_edges[-1]))
-    ax_hist.set_xlabel(xlabel)
-    ax_hist.set_ylabel(ylabel)
     
-    # Plot mean lines on main plot if stats provided
-    if stats:
-        if "x_mean" in stats:
-            ax_hist.axvline(stats["x_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
-            ax_x.axvline(stats["x_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
-        if "y_mean" in stats:
-            ax_hist.axhline(stats["y_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
-            ax_y.axhline(stats["y_mean"], color='red', linestyle='--', linewidth=1, alpha=0.7)
-
-    # Marginals
-    ax_x.hist(
-        np.repeat((x_edges[:-1] + x_edges[1:]) / 2.0, H.sum(axis=1).astype(int), axis=0)
-        if H.size and H.sum() > 0 else [],
-        bins=x_edges,
-        color="#6666aa",
-    )
-    ax_x.axis("off")
-    ax_y.hist(
-        np.repeat((y_edges[:-1] + y_edges[1:]) / 2.0, H.sum(axis=0).astype(int), axis=0)
-        if H.size and H.sum() > 0 else [],
-        bins=y_edges,
-        orientation="horizontal",
-        color="#66aa66",
-    )
-    ax_y.axis("off")
+    H_dist_m = np.ma.masked_where(H_dist == 0, H_dist)
+    H_rapp_m = np.ma.masked_where(H_rapp == 0, H_rapp)
     
-    # Add statistics text
-    if stats:
-        txt = []
-        if "x_mean" in stats and "x_std" in stats:
-            txt.append(f"Dist: {stats['x_mean']:.1f} ± {stats['x_std']:.1f} Å")
-        if "y_mean" in stats and "y_std" in stats:
-            txt.append(f"$\\kappa^2$: {stats['y_mean']:.2f} ± {stats['y_std']:.2f}")
+    cmap = cm.get_cmap(cmap_2d).copy()
+    cmap.set_bad(color='white')
+
+    # Figure Layout
+    fig = plt.figure(figsize=(16, 7))
+    
+    # Dimensions
+    b_main = 0.10
+    h_main = 0.60
+    w_main = 0.35 
+    h_marg = 0.15
+    w_marg_y = 0.08
+    gap_x = 0.0
+    
+    # Panel 1 (Left): R_app vs K2
+    l1 = 0.08
+    rect_rapp = [l1, b_main, w_main, h_main]
+    rect_rapp_x = [l1, b_main + h_main, w_main, h_marg]
+    
+    # Panel 2 (Right): Dist vs K2
+    l2 = l1 + w_main + gap_x
+    rect_dist = [l2, b_main, w_main, h_main]
+    rect_dist_x = [l2, b_main + h_main, w_main, h_marg]
+    
+    # Shared Y Marginal (Far Right)
+    l_y = l2 + w_main
+    rect_y = [l_y, b_main, w_marg_y, h_main]
+    rect_text = [l_y, b_main + h_main, w_marg_y*2, h_marg] 
+    
+    # Create Axes (NO SHARING to avoid auto-hide bugs)
+    ax_rapp = fig.add_axes(rect_rapp)
+    ax_rapp_x = fig.add_axes(rect_rapp_x)
+    ax_dist = fig.add_axes(rect_dist)
+    ax_dist_x = fig.add_axes(rect_dist_x)
+    ax_y = fig.add_axes(rect_y)
+    ax_text = fig.add_axes(rect_text)
+    ax_text.axis("off") 
+    
+    axes_main = [ax_rapp, ax_dist]
+    axes_x = [ax_rapp_x, ax_dist_x]
+    
+    # Common Ticks Definition
+    x_ticks_maj = np.arange(0, 160, 20)
+    # Y Ticks: Log decades + 0.5 steps
+    y_ticks_vals = [0.01, 0.1, 0.5, 1.0, 2.0, 4.0]
+    
+    # Plotting Main 2D
+    def plot_2d_main(ax, H):
+        im = ax.pcolormesh(x_edges, y_edges, H.T, cmap=cmap, shading="auto", rasterized=True)
+        ax.set_yscale("log")
+        ax.set_xlim(0, 150)
+        ax.set_ylim(0.005, 4.5)
+        
+        # Grid settings
+        # ax.grid(False) 
+
+        # Ticks Configuration
+        ax.xaxis.set_major_locator(ticker.FixedLocator(x_ticks_maj))
+        ax.yaxis.set_major_locator(ticker.FixedLocator(y_ticks_vals))
+        ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
+        ax.set_yticklabels([f"{t:g}" for t in y_ticks_vals])
+        
+        # Turn off minor ticks to align with user requested explicit ticks
+        ax.minorticks_off()
+        
+        # Tick Params: Enable ALL sides (Top, Right, Left, Bottom)
+        # Direction IN. Labels mostly controlled separately.
+        ax.tick_params(axis='both', which='major', direction='in', length=6, width=1.5,
+                       top=True, right=True, bottom=True, left=True,
+                       labelbottom=True, labelleft=True, labelsize=12)
+                       
+        # Bold labels
+        for label in (ax.get_xticklabels() + ax.get_yticklabels()):
+            label.set_fontweight('bold')
+            label.set_fontsize(12)
             
+        # Spines
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color('black')
+            spine.set_linewidth(1.5)
+        return im
+
+    img1 = plot_2d_main(ax_rapp, H_rapp_m)
+    img2 = plot_2d_main(ax_dist, H_dist_m)
+    
+    # Axis Labels
+    ax_rapp.set_xlabel("Apparent Distance (Å)", fontsize=14, fontweight='bold')
+    ax_rapp.set_ylabel("$\\kappa^2$", fontsize=14, fontweight='bold')
+    ax_dist.set_xlabel("Distance (Å)", fontsize=14, fontweight='bold')
+    ax_dist.set_ylabel("") # No label for second plot
+    
+    # Fix specific visibility for side-by-side layout
+    # Ax Rapp: Left labels ON.
+    # Ax Dist: Left labels OFF (but ticks ON).
+    ax_dist.tick_params(axis='y', labelleft=False)
+    
+    # Marginals
+    def plot_marginal_x(ax, H, color):
+        counts = H.sum(axis=1)
+        # Using raw counts for marginals to match visual density (especially for log axes)
+        ax.bar(x_edges[:-1], counts, width=np.diff(x_edges), color=color, alpha=0.9, align='edge', edgecolor=color)
+        ax.set_xlim(0, 150)
+        ax.set_xticks([]) # Hide marginal ticks
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_linewidth(1.5)
+    
+    plot_marginal_x(ax_rapp_x, H_rapp, "#6666aa")
+    plot_marginal_x(ax_dist_x, H_dist, "#6666aa")
+    
+    # Y Marginal
+    y_counts = H_dist.sum(axis=0)
+    y_widths = np.diff(y_edges)
+    # Use raw counts for Y marginal on log axis to represent density per log-interval
+    ax_y.barh(y_edges[:-1], y_counts, height=y_widths, color="#66aa66", alpha=0.9, align='edge', edgecolor="#66aa66")
+    ax_y.set_yscale("log")
+    ax_y.set_ylim(0.005, 4.5)
+    ax_y.set_xticks([])
+    ax_y.set_yticks([])
+    for spine in ax_y.spines.values():
+        spine.set_linewidth(1.5)
+        
+    # Stats Lines (Mean - Dashed)
+    if stats:
+        if "r_app_mean" in stats:
+            m = stats["r_app_mean"]
+            ax_rapp.axvline(m, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+            ax_rapp_x.axvline(m, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+        if "y_mean" in stats:
+            m = stats["y_mean"]
+            for ax in [ax_rapp, ax_dist, ax_y]:
+                ax.axhline(m, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+        if "x_mean" in stats:
+            m = stats["x_mean"]
+            ax_dist.axvline(m, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+            ax_dist_x.axvline(m, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+
+    # Mode Lines (Mode - Dotted)
+    if stats:
+        if "r_app_mode" in stats and not np.isnan(stats["r_app_mode"]):
+            m = stats["r_app_mode"]
+            ax_rapp.axvline(m, color='red', linestyle=':', linewidth=1.5, alpha=0.9)
+            ax_rapp_x.axvline(m, color='red', linestyle=':', linewidth=1.5, alpha=0.9)
+        if "y_mode" in stats and not np.isnan(stats["y_mode"]):
+            m = stats["y_mode"]
+            for ax in [ax_rapp, ax_dist, ax_y]:
+                ax.axhline(m, color='red', linestyle=':', linewidth=1.5, alpha=0.9)
+        if "x_mode" in stats and not np.isnan(stats["x_mode"]):
+            m = stats["x_mode"]
+            ax_dist.axvline(m, color='red', linestyle=':', linewidth=1.5, alpha=0.9)
+            ax_dist_x.axvline(m, color='red', linestyle=':', linewidth=1.5, alpha=0.9)
+
+    # Legend
+    if stats:
+        # 1. Means (Bottom Legend)
+        txt = []
+        if "r_app_mean" in stats:
+             txt.append(f"$R_{{app}}(2/3)$: {stats['r_app_mean']:.1f} ± {stats['r_app_std']:.1f} Å")
+        if "x_mean" in stats:
+            txt.append(f"Dist: {stats['x_mean']:.1f} ± {stats['x_std']:.1f} Å")
+        if "y_mean" in stats:
+            txt.append(f"$\\kappa^2$: {stats['y_mean']:.2f} ± {stats['y_std']:.2f}")
+
+        # 2. Modes (Top Legend)
+        txt_m = []
+        if "r_app_mode" in stats and not np.isnan(stats["r_app_mode"]):
+             txt_m.append(f"$R_{{app}}$ Mode: {stats['r_app_mode']:.1f} Å")
+        if "x_mode" in stats and not np.isnan(stats["x_mode"]):
+             txt_m.append(f"Dist Mode: {stats['x_mode']:.1f} Å")
+        if "y_mode" in stats and not np.isnan(stats["y_mode"]):
+             txt_m.append(f"$\\kappa^2$ Mode: {stats['y_mode']:.2f}")
+
+        # Display Stats (Means) - Lower
         if txt:
-            # Place text on the top right of the top marginal area (ax_x) roughly, or main figure
-            # Actually better to put it in a dedicated text box on the figure
-            fig.text(0.98, 0.98, "\n".join(txt), 
-                     horizontalalignment='right', 
-                     verticalalignment='top',
-                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.9),
-                     fontsize=9)
+            ax_text.text(0.2, 0.45, "\n".join(txt), transform=ax_text.transAxes,
+                         horizontalalignment='left', verticalalignment='center',
+                         bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, linewidth=1.5, edgecolor='black'),
+                         fontsize=11, fontweight='bold')
+                         
+        # Display Modes - Upper
+        if txt_m:
+            ax_text.text(0.2, 1.2, "\n".join(txt_m), transform=ax_text.transAxes,
+                         horizontalalignment='left', verticalalignment='center',
+                         bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, linewidth=1.5, edgecolor='black'),
+                         fontsize=11, fontweight='bold')
 
     # Colorbar
-    cax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-    fig.colorbar(im, cax=cax, label="Counts")
+    cax = fig.add_axes([0.88, b_main, 0.015, h_main])
+    cbar = fig.colorbar(img2, cax=cax)
+    cbar.set_label("Counts", fontsize=14, fontweight='bold')
+    cbar.ax.tick_params(labelsize=12)
 
-    fig.suptitle(title)
+    if title:
+        fig.suptitle(title, fontsize=18, fontweight='bold', y=0.98)
+        
     img_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(img_path), dpi=150, bbox_inches="tight")
     plt.close(fig)

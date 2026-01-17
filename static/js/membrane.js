@@ -83,6 +83,7 @@ function handleMouseUp(e) {
     state.isSelecting = false;
     state.startPos = -1;
     updateMembraneDisplay();
+    highlightFromTextField();
 }
 
 function highlightSelection(start, end) {

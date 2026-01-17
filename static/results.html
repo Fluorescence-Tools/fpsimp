@@ -232,37 +232,31 @@
             <!-- Measurement Analysis -->
             {% if all_files %}
             {% set measure_tsv = namespace(path=None) %}
+            {% set measure_img = namespace(path=None) %}
             {% for file in all_files %}
             {% if file.name == 'measurements.tsv' or file.name.endswith('.tsv') %}
             {% set measure_tsv.path = file.path %}
             {% endif %}
+            {% if file.name == 'measurements.png' or (file.name.endswith('.png') and 'measure' in file.name) %}
+            {% set measure_img.path = file.path %}
+            {% endif %}
             {% endfor %}
 
-            {% if measure_tsv.path %}
+            {% if measure_img.path %}
             <div class="card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">Measurement Analysis</h5>
+                    {% if measure_tsv.path %}
                     <a href="/api/download/{{ job_id }}/{{ measure_tsv.path|urlencode }}"
                         class="btn btn-sm btn-outline-primary">
                         <i class="fas fa-download me-1"></i>Download Data (TSV)
                     </a>
+                    {% endif %}
                 </div>
-                <div class="card-body">
-                    <div id="measurementPlot" style="width: 100%; height: 600px;"></div>
-                    <div id="measurementLoading" class="text-center py-5">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2 text-muted">Loading visualization data...</p>
-                    </div>
+                <div class="card-body text-center">
+                    <img src="/api/download/{{ job_id }}/{{ measure_img.path|urlencode }}"
+                        class="img-fluid border rounded" alt="Measurement Analysis">
                 </div>
-                <script>
-                    document.addEventListener('DOMContentLoaded', () => {
-                        if (window.renderMeasurementAnalysis) {
-                            window.renderMeasurementAnalysis('{{ job_id }}', '{{ measure_tsv.path }}');
-                        }
-                    });
-                </script>
             </div>
             {% endif %}
             {% endif %}

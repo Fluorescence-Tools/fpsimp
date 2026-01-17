@@ -590,8 +590,7 @@ export function updateMembraneDisplay() {
 }
 
 export function updateRegionCount() {
-    if (!state.currentSequence) return;
-
+    console.log('DEBUG: updateRegionCount called');
     const membraneSeqInput = document.getElementById(DOM.membraneSeqInput);
     const tokens = membraneSeqInput ? parseIdList((membraneSeqInput.value || '').toUpperCase()) : [];
     const regionCount = tokens.length;
@@ -599,13 +598,29 @@ export function updateRegionCount() {
     const countElement = document.getElementById(DOM.regionCount);
     if (countElement) {
         countElement.textContent = regionCount;
+    }
 
-        const membraneCheckbox = document.getElementById('membrane');
-        if (membraneCheckbox) {
+    const membraneCheckbox = document.getElementById('membrane');
+    if (membraneCheckbox) {
+        if (regionCount > 0) {
+            membraneCheckbox.checked = true;
+            membraneCheckbox.disabled = false;
+        } else {
+            // Only uncheck if it was automatically checked? 
+            // Or just reflect status? 
+            // The user request says: "when there is a valid seq, activate memebrane pot".
+            // It implies if I delete it, it might deactivate, or maybe just remain valid.
+            // Standard behavior usually implies strict sync if it tracks validity.
+            // However, checking it manually should stay checks.
+            // But here we are reacting to INPUT on the text field.
+            // If text field is empty, we probably shouldn't FORCE uncheck if the user manually checked it?
+            // Actually, if the text field is empty, there is no membrane sequence, so membrane potential MIGHT be invalid or just not applicable.
+            // Existing logic: membraneCheckbox.checked = regionCount > 0;
+            // This existing logic forces it to false if 0.
+            // I will stick to the logic "if valid seq -> activate". 
+            // If valid seq -> checked = true.
+            // If empty -> using previous logic it was checked = false. I will preserve that behavior for consistency unless requested otherwise.
             membraneCheckbox.checked = regionCount > 0;
-            if (regionCount > 0) {
-                membraneCheckbox.disabled = false;
-            }
         }
     }
 }

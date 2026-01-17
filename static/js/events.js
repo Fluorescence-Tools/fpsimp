@@ -1,7 +1,8 @@
 import { DOM } from './config.js';
 import { handleFileUpload, handlePdbUpload, handleFetchStructure, clearSelectedStructures, recalculateSegmentation } from './api.js';
 import { handleSequenceSelect } from './sequence.js';
-import { handleMembraneSeqInputEvent, clearMembraneRegions, highlightFromTextField } from './membrane.js';
+import { handleMembraneSeqInputEvent, clearMembraneRegions, highlightFromTextField, updateSelectorHighlightFromTextField } from './membrane.js';
+import { updateRegionCount } from './ui.js';
 import { submitJob } from './job.js';
 import { toggleFPSiteSelection, setupFPSiteListeners } from './fp.js';
 
@@ -65,7 +66,13 @@ export function initializeEventListeners() {
 
     const membraneSeqInput = document.getElementById(DOM.membraneSeqInput);
     if (membraneSeqInput) {
-        const onMembraneInput = (e) => handleMembraneSeqInputEvent(e);
+        const onMembraneInput = (e) => {
+            handleMembraneSeqInputEvent(e);
+            // Explicitly call update functions to ensure UI sync
+            updateRegionCount();
+            highlightFromTextField();
+            updateSelectorHighlightFromTextField();
+        };
         membraneSeqInput.addEventListener('input', onMembraneInput);
         membraneSeqInput.addEventListener('change', onMembraneInput);
         membraneSeqInput.addEventListener('keyup', (e) => {

@@ -107,6 +107,16 @@ The interface provides all fpsim CLI parameters organized into sections:
 - Once completed, download RMF files and other outputs
 - Results include topology files, segments, and simulation trajectories
 
+### 7. Measurement Outputs
+
+The measurement results are provided in a TSV file with the following columns:
+
+- **frame**: Simulation frame number
+- **RDA**: Distance between fluorophore centers (Å)
+- **kappa**: Orientation factor $\kappa$ (if 4 sites defined)
+- **kappa2**: Orientation factor $\kappa^2$ (if 4 sites defined)
+- **Rapp**: Apparent distance calculated as $R_{app} = R_{DA} \times (\frac{2/3}{\kappa^2})^{1/6}$
+
 ## Pipeline Integration
 
 The web interface includes a complete, standalone fpsim implementation:

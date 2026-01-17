@@ -20,12 +20,12 @@ export async function visualizeStructure(structure) {
             console.log('pLDDT keys:', Object.keys(structure.plddt));
             console.log('pLDDT sample:', Object.values(structure.plddt)[0]);
         } else {
-            console.error('Structure object has no plddt property');
+            console.log('Structure object has no plddt property (may be raw structure)');
         }
         if (structure.segments) {
             console.log('Segments keys:', Object.keys(structure.segments));
         } else {
-            console.error('Structure object has no segments property');
+            console.log('Structure object has no segments property (may be raw structure)');
         }
 
         // 1. Show 3D Viewer

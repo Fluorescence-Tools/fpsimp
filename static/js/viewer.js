@@ -146,6 +146,26 @@ export async function showStructurePreview(fileUrl, filename = 'structure', sequ
     }
 
     try {
+        // Verify file existence first to avoid NGL errors and network issues
+        try {
+            const response = await fetch(fileUrl, { method: 'HEAD' });
+            if (!response.ok) {
+                console.warn(`Structure file not found: ${fileUrl} (${response.status})`);
+                viewerElement.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; 
+                                color: #6c757d; text-align: center; flex-direction: column;">
+                        <i class="fas fa-file-circle-xmark fa-2x mb-2"></i>
+                        <div>Structure file not found</div>
+                        <small class="mt-1">The file may have expired or been removed from the server.</small>
+                    </div>
+                `;
+                return false;
+            }
+        } catch (fetchError) {
+            console.warn('Error checking file existence:', fetchError);
+            // Continue and let NGL try, in case HEAD is blocked but GET works, or other network weirdness
+        }
+
         // Ensure NGL is loaded
         const nglAvailable = await ensureNGLLoaded();
         if (!nglAvailable) {

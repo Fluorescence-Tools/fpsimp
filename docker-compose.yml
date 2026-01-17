@@ -19,7 +19,9 @@ services:
       - ./.env:/app/.env
       - ./:/app
       - ./uploads:/app/uploads
+      # - /fpsimp/uploads:/app/uploads
       - ./results:/app/results
+      # - /fpsimp/results:/app/results
       - ./cf_queue:/app/cf_queue
       # Give Docker access for ColabFold master interaction
       - /var/run/docker.sock:/var/run/docker.sock
@@ -43,6 +45,8 @@ services:
     volumes:
       - ./.env:/app/.env
       - ./:/app
+      # - /fpsimp/uploads:/app/uploads
+      # - /fpsimp/results:/app/results
       # Give Docker access for ColabFold master interaction
       - /var/run/docker.sock:/var/run/docker.sock
       # Add ColabFold shared volumes for direct access

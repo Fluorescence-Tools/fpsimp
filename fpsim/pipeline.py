@@ -499,21 +499,48 @@ def process_single_chain_workflow(config: PipelineConfig, af_pdb: Path, seq_id_r
     seq_id = seq_id_raw
     seq_for_seg = seq_raw
     
-    # Find FP domains and create segments
-    domains = find_fp_domains(seq_for_seg, config.fp_library, min_identity=0.40, verbose=config.verbose)
-    config.vprint(f"[run {config.chain}] FP domains: {[(n,s,e,round(idy,2)) for (n,s,e,idy) in domains]}")
     
-    plddt = parse_plddt_from_pdb(af_pdb, config.chain)
-    config.vprint(f"[run {config.chain}] pLDDT residues parsed: {len(plddt)}")
-    
-    sorted_residues = sorted(plddt.keys())
-    segs = segments_from_plddt(
-        len(seq_for_seg), plddt, domains,
-        residue_numbers=sorted_residues, 
-        rigid_threshold=config.plddt_rigid, min_rb_len=config.min_rb_len,
-        min_linker_len=config.min_linker_len
-    )
-    config.vprint(f"[run {config.chain}] segments: {len(segs)} -> {[(seg['kind'], seg['start'], seg['end']) for seg in segs]}")
+    # Check for segments override
+    # Try to find override for current chain
+    override_segs = None
+    if config.segments_override:
+        if config.chain in config.segments_override:
+            override_segs = config.segments_override[config.chain]
+        elif len(config.segments_override) == 1:
+            # Fallback for single-chain jobs where key might differ
+            override_segs = list(config.segments_override.values())[0]
+            config.vprint(f"[override] Using provided segments (inferred chain match)")
+
+    if override_segs:
+        config.vprint(f"[override] Using provided segmentation override for chain {config.chain}")
+        segs = override_segs
+        
+        # Reconstruct FP domains from segments
+        domains = []
+        for s in segs:
+            if s.get('kind') == 'fp':
+                domains.append((
+                    s.get('name', 'FP'), 
+                    int(s['start']), 
+                    int(s['end']), 
+                    s.get('identity', 1.0)
+                ))
+    else:
+        # Find FP domains and create segments
+        domains = find_fp_domains(seq_for_seg, config.fp_library, min_identity=0.40, verbose=config.verbose)
+        config.vprint(f"[run {config.chain}] FP domains: {[(n,s,e,round(idy,2)) for (n,s,e,idy) in domains]}")
+        
+        plddt = parse_plddt_from_pdb(af_pdb, config.chain)
+        config.vprint(f"[run {config.chain}] pLDDT residues parsed: {len(plddt)}")
+        
+        sorted_residues = sorted(plddt.keys())
+        segs = segments_from_plddt(
+            len(seq_for_seg), plddt, domains,
+            residue_numbers=sorted_residues, 
+            rigid_threshold=config.plddt_rigid, min_rb_len=config.min_rb_len,
+            min_linker_len=config.min_linker_len
+        )
+        config.vprint(f"[run {config.chain}] segments: {len(segs)} -> {[(seg['kind'], seg['start'], seg['end']) for seg in segs]}")
     
     # Create metadata
     _, colors, _, _ = get_fp_library()

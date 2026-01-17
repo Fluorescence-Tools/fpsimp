@@ -96,13 +96,21 @@ def write_top(
     fp_color_map = {k.lower(): v for k, v in FP_COLOR.items()}
 
     # Emit a line per atomic piece (core split at FP edges; each linker its own)
+    # Emit a line per atomic piece (core split at FP edges; each linker its own)
     for seg in segs:
         a, b = int(seg["start"]), int(seg["end"])
-        if seg["kind"] == "linker":
+        
+        # Determine representation (linker=beads, core=rigid)
+        kind = seg.get("kind", "core")
+        rep = seg.get("representation", "bead" if kind == "linker" else "rigid_body")
+        user_color = seg.get("color")
+        
+        if rep == "bead":
             rr = f"{a},{b}"
             use_rb = next_rb; next_rb += 1
+            seg_color = user_color if user_color else linker_color
             line = (
-                f"|{molecule_name}|{linker_color}|{fasta_fn}|{fasta_id}|BEADS|{chain_id}|{rr}|{pdb_offset}|"
+                f"|{molecule_name}|{seg_color}|{fasta_fn}|{fasta_id}|BEADS|{chain_id}|{rr}|{pdb_offset}|"
                 f"{bead_size}|{em_res_per_gaussian}|{use_rb}|1||"
             )
             lines.append(line)
@@ -111,15 +119,22 @@ def write_top(
                 rr = f"{s},{e}"
                 if kind == "fp":
                     use_rb = next_rb; next_rb += 1
-                    color = fp_color_map.get(fp_nm.lower(), core_color) if fp_nm else core_color
+                    # Use user_color if available, else use FP color map
+                    if user_color:
+                        color = user_color
+                    else:
+                        color = fp_color_map.get(fp_nm.lower(), core_color) if fp_nm else core_color
+                    
                     line = (
                         f"|{molecule_name}|{color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{chain_id}|{rr}|{pdb_offset}|"
                         f"1|{em_res_per_gaussian}|{use_rb}|1||"
                     )
                 else:
                     use_rb = protein_rb
+                    color = user_color if user_color else core_color
+                    
                     line = (
-                        f"|{molecule_name}|{core_color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{chain_id}|{rr}|{pdb_offset}|"
+                        f"|{molecule_name}|{color}|{fasta_fn}|{fasta_id}|{pdb_fn}|{chain_id}|{rr}|{pdb_offset}|"
                         f"1|{em_res_per_gaussian}|{use_rb}|1||"
                     )
                 lines.append(line)

@@ -12,6 +12,7 @@
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         .status-badge {
             font-size: 1rem;
@@ -256,6 +257,23 @@
                 <div class="card-body text-center">
                     <img src="/api/download/{{ job_id }}/{{ measure_img.path|urlencode }}"
                         class="img-fluid border rounded" alt="Measurement Analysis">
+
+                    <p class="text-muted small mt-3 text-start">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Apparent distance reflects the distance that would be measured in a FRET experiment if
+                        \(\kappa^2\) was 2/3:
+                        \(R_{\text{app}} = R \cdot \left( \frac{2/3}{\kappa^2} \right)^{1/6}\).
+                        {% if parameters.sites and parameters.sites|length >= 2 %}
+                        {% if parameters.sites|length == 4 %}
+                        The distance is measured between the center of two dipoles.
+                        <strong>Dipole 1:</strong> {{ parameters.sites[0] }} → {{ parameters.sites[1] }}.
+                        <strong>Dipole 2:</strong> {{ parameters.sites[2] }} → {{ parameters.sites[3] }}.
+                        {% else %}
+                        The distance is measured between <strong>{{ parameters.sites[0] }}</strong> and <strong>{{
+                            parameters.sites[1] }}</strong>.
+                        {% endif %}
+                        {% endif %}
+                    </p>
                 </div>
             </div>
             {% endif %}

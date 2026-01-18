@@ -61,11 +61,20 @@ def results_page(job_id: str):
             # Sort files by name (directories/groups typically handled by table sorting if implemented, but simple sort here)
             all_files.sort(key=lambda x: x['name'])
             
+    # Parse parameters if present
+    parameters = {}
+    if 'parameters' in job_data:
+        try:
+            parameters = json.loads(job_data['parameters'])
+        except:
+            pass
+
     return render_static_template(
         'results.html',
         job_id=job_id,
         status=status,
         job_data=job_data,
+        parameters=parameters,
         results=results,
         all_files=all_files,
         config=current_app.config,
